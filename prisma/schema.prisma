@@ -1,0 +1,408 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanTier {
+  GOLD
+  SILVER
+  JUNIOR
+}
+
+enum MemberStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+}
+
+enum SportType {
+  TENNIS
+  CRICKET
+}
+
+enum BookingStatus {
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  UPI
+}
+
+enum ProductCategory {
+  RACKET
+  BALLS
+  SHOES
+  APPAREL
+  ACCESSORIES
+}
+
+enum OrderType {
+  IN_STORE
+  ONLINE_COLLECTION
+  ONLINE_DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  READY_FOR_PICKUP
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+}
+
+enum TabStatus {
+  OPEN
+  CLOSED
+  VOIDED
+}
+
+enum KitchenStatus {
+  PREPARING
+  READY
+  SERVED
+}
+
+enum MenuCategory {
+  BEVERAGES
+  SNACKS
+  MAINS
+  ENERGY_DRINKS
+}
+
+enum TransactionType {
+  COURT_BOOKING
+  SHOP_PURCHASE
+  BAR_BILL
+  MEMBERSHIP_FEE
+  CORPORATE_INVOICE
+}
+
+enum TransactionCategory {
+  COURT
+  SHOP
+  BAR
+  MEMBERSHIP
+  CORPORATE
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUOTE_SENT
+  CONVERTED
+  CLOSED
+}
+
+enum StaffRole {
+  FRONT_DESK
+  BARISTA
+  CHEF
+  COURT_COACH
+  MANAGER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// 1. CRM & Membership Engine
+model MembershipPlan {
+  id                    String        @id @default(uuid())
+  tier                  PlanTier      @unique
+  name                  String
+  monthlyFee            Float
+  courtDiscountPercent  Float         // e.g., 100 for Gold (free courts), 50 for Silver, 30 for Junior
+  shopDiscountPercent   Float         // e.g., 20 for Gold, 10 for Silver, 15 for Junior
+  barDiscountPercent    Float         // e.g., 20 for Gold, 10 for Silver, 5 for Junior
+  maxDailyBookings      Int           @default(2)
+  perks                 String[]
+  color                 String        @default("amber")
+  members               Member[]
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+}
+
+model Member {
+  id              String          @id @default(uuid())
+  memberNumber    String          @unique
+  name            String
+  email           String          @unique
+  phone           String
+  avatar          String?
+  planTier        PlanTier
+  plan            MembershipPlan  @relation(fields: [planTier], references: [tier])
+  startDate       DateTime        @default(now())
+  expiryDate      DateTime
+  status          MemberStatus    @default(ACTIVE)
+  notes           String?
+  courtBookings   CourtBooking[]
+  shopOrders      ShopOrder[]
+  barTabs         BarTab[]
+  transactions    Transaction[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model Lead {
+  id              String          @id @default(uuid())
+  name            String
+  email           String
+  phone           String
+  interest        String          // Tennis, Cricket, Junior Coaching, Gold Membership, etc.
+  status          LeadStatus      @default(NEW)
+  notes           String?
+  quoteAmount     Float?
+  trialDate       DateTime?
+  convertedToId   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+// 2. Court Booking Engine
+model Court {
+  id              String          @id @default(uuid())
+  name            String
+  sport           SportType
+  surface         String          // e.g., "Plexicushion Synthetic", "Red Clay", "AstroTurf"
+  hourlyRate      Float           // Walk-in base rate (e.g. 800)
+  isAvailable     Boolean         @default(true)
+  description     String?
+  bookings        CourtBooking[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model CourtBooking {
+  id                  String          @id @default(uuid())
+  courtId             String
+  court               Court           @relation(fields: [courtId], references: [id])
+  memberId            String?
+  member              Member?         @relation(fields: [memberId], references: [id])
+  guestName           String?
+  guestPhone          String?
+  startTime           DateTime
+  endTime             DateTime
+  isSocialPlay        Boolean         @default(false)
+  socialPlayersCount  Int             @default(1)
+  basePrice           Float
+  discountAmount      Float           @default(0)
+  finalPrice          Float
+  status              BookingStatus   @default(CONFIRMED)
+  paymentStatus       PaymentStatus   @default(PENDING)
+  paymentMethod       PaymentMethod?
+  transactionId       String?         @unique
+  transaction         Transaction?    @relation(fields: [transactionId], references: [id])
+  notes               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([courtId, startTime, endTime])
+}
+
+// 3. Omnichannel POS & Bar Engine
+model ShopProduct {
+  id                String          @id @default(uuid())
+  sku               String          @unique
+  name              String
+  category          ProductCategory
+  price             Float
+  stockQuantity     Int
+  reorderThreshold  Int             @default(5)
+  description       String
+  imageUrl          String?
+  orderItems        ShopOrderItem[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model ShopOrder {
+  id                String          @id @default(uuid())
+  orderNumber       String          @unique
+  memberId          String?
+  member            Member?         @relation(fields: [memberId], references: [id])
+  customerName      String
+  customerPhone     String
+  orderType         OrderType       @default(IN_STORE)
+  deliveryAddress   String?
+  status            OrderStatus     @default(COMPLETED)
+  totalBasePrice    Float
+  discountAmount    Float           @default(0)
+  finalPrice        Float
+  paymentStatus     PaymentStatus   @default(PAID)
+  paymentMethod     PaymentMethod?
+  transactionId     String?         @unique
+  transaction       Transaction?    @relation(fields: [transactionId], references: [id])
+  items             ShopOrderItem[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model ShopOrderItem {
+  id            String       @id @default(uuid())
+  orderId       String
+  order         ShopOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       ShopProduct  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPrice     Float
+  totalPrice    Float
+}
+
+model BarTable {
+  id            String       @id @default(uuid())
+  tableNumber   Int          @unique
+  name          String       // e.g. "Table 1", "Bar High-Top 4"
+  capacity      Int
+  status        TableStatus  @default(AVAILABLE)
+  tabs          BarTab[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model BarMenuItem {
+  id              String          @id @default(uuid())
+  name            String
+  category        MenuCategory
+  price           Float
+  prepTimeMinutes Int             @default(10)
+  isAvailable     Boolean         @default(true)
+  orderItems      BarOrderItem[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model BarTab {
+  id              String          @id @default(uuid())
+  tabNumber       String          @unique
+  tableId         String
+  table           BarTable        @relation(fields: [tableId], references: [id])
+  memberId        String?
+  member          Member?         @relation(fields: [memberId], references: [id])
+  guestName       String?
+  status          TabStatus       @default(OPEN)
+  openedAt        DateTime        @default(now())
+  closedAt        DateTime?
+  subtotal        Float           @default(0)
+  discountAmount  Float           @default(0)
+  taxAmount       Float           @default(0)
+  finalAmount     Float           @default(0)
+  paymentStatus   PaymentStatus   @default(PENDING)
+  paymentMethod   PaymentMethod?
+  transactionId   String?         @unique
+  transaction     Transaction?    @relation(fields: [transactionId], references: [id])
+  items           BarOrderItem[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model BarOrderItem {
+  id              String          @id @default(uuid())
+  tabId           String
+  tab             BarTab          @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  menuItemId      String
+  menuItem        BarMenuItem     @relation(fields: [menuItemId], references: [id])
+  quantity        Int
+  unitPrice       Float
+  totalPrice      Float
+  kitchenStatus   KitchenStatus   @default(PREPARING)
+  kitchenNotes    String?
+  orderedAt       DateTime        @default(now())
+  readyAt         DateTime?
+  servedAt        DateTime?
+}
+
+// 4. Finance & HR Aggregator
+model Transaction {
+  id              String              @id @default(uuid())
+  referenceNo     String              @unique
+  type            TransactionType
+  category        TransactionCategory
+  amount          Float
+  paymentMethod   PaymentMethod
+  memberId        String?
+  member          Member?             @relation(fields: [memberId], references: [id])
+  notes           String
+  createdAt       DateTime            @default(now())
+  courtBooking    CourtBooking?
+  shopOrder       ShopOrder?
+  barTab          BarTab?
+
+  @@index([createdAt])
+  @@index([category])
+}
+
+model StaffMember {
+  id              String          @id @default(uuid())
+  name            String
+  role            StaffRole
+  phone           String
+  email           String          @unique
+  hourlyWage      Float           @default(150)
+  monthlySalary   Float           @default(35000)
+  shifts          Shift[]
+  leaves          Leave[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model Shift {
+  id              String          @id @default(uuid())
+  staffId         String
+  staff           StaffMember     @relation(fields: [staffId], references: [id])
+  date            DateTime
+  startTime       String          // e.g. "08:00"
+  endTime         String          // e.g. "16:00"
+  hoursWorked     Float           @default(8)
+  notes           String?
+  createdAt       DateTime        @default(now())
+}
+
+model Leave {
+  id              String          @id @default(uuid())
+  staffId         String
+  staff           StaffMember     @relation(fields: [staffId], references: [id])
+  startDate       DateTime
+  endDate         DateTime
+  reason          String
+  status          LeaveStatus     @default(PENDING)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model Invoice {
+  id              String          @id @default(uuid())
+  invoiceNumber   String          @unique
+  clientName      String
+  clientEmail     String
+  clientType      String          // "CORPORATE", "MEMBER_ANNUAL", "TOURNAMENT_SPONSOR"
+  amount          Float
+  taxAmount       Float
+  totalAmount     Float
+  dueDate         DateTime
+  status          PaymentStatus   @default(PENDING)
+  description     String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
