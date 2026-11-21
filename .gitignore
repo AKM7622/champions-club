@@ -67,7 +67,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# AI folders
+#Others
+.misc
 .agents
 .claude
 .cursor
