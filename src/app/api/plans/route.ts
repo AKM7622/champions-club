@@ -1,19 +1,18 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { NextRequest } from "next/server";
+import { getPlans, updatePlan } from "@/lib/plan-service";
 
-export async function GET() {
-  try {
-    const plans = await prisma.membershipPlan.findMany({
-      orderBy: { monthlyFee: "desc" },
-      include: {
-        _count: {
-          select: { members: true },
-        },
-      },
-    });
+export async function GET(req: NextRequest) {
+  return getPlans(req);
+}
 
-    return NextResponse.json({ success: true, plans });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+export async function PUT(req: NextRequest) {
+  return updatePlan(req);
+}
+
+export async function PATCH(req: NextRequest) {
+  return updatePlan(req);
+}
+
+export async function POST(req: NextRequest) {
+  return updatePlan(req);
 }

@@ -20,30 +20,101 @@ import {
 import { formatCurrency, formatTime } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
 
-export function BarScene() {
-  const [tables, setTables] = useState<any[]>([]);
+interface BarSceneProps {
+  initialView?: "TABLES" | "KITCHEN" | "CLOSING";
+  initialSettledToday?: any[];
+  initialKitchenQueue?: any[];
+  initialTotalEarnings?: number;
+  initialTables?: any[];
+  initialSelectedTableId?: string;
+  pollIntervalMs?: number;
+  onDataLoaded?: (data: {
+    tables: any[];
+    selectedTable: any;
+    selectedMenuItemId?: string;
+    settlingTab?: any;
+  }) => void;
+  onTableSelect?: (table: any) => void;
+  tableSelectRef?: React.MutableRefObject<((table: any) => void) | null>;
+  menuSelectRef?: React.MutableRefObject<((menuItemId: string) => void) | null>;
+  settleTabRef?: React.MutableRefObject<((tab: any) => void) | null>;
+}
+
+export function BarScene({
+  initialView = "TABLES",
+  initialSettledToday = [],
+  initialKitchenQueue = [],
+  initialTotalEarnings = 0,
+  initialTables = [],
+  initialSelectedTableId,
+  pollIntervalMs = 3500,
+  onDataLoaded,
+  onTableSelect,
+  tableSelectRef,
+  menuSelectRef,
+  settleTabRef,
+}: BarSceneProps = {}) {
+  const [tables, setTables] = useState<any[]>(initialTables);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [openTabs, setOpenTabs] = useState<any[]>([]);
-  const [kitchenQueue, setKitchenQueue] = useState<any[]>([]);
-  const [totalBarEarningsToday, setTotalBarEarningsToday] = useState<number>(0);
-  const [settledToday, setSettledToday] = useState<any[]>([]);
-  const [activeTabSubView, setActiveTabSubView] = useState<"TABLES" | "KITCHEN" | "CLOSING">("TABLES");
+  const [kitchenQueue, setKitchenQueue] = useState<any[]>(initialKitchenQueue);
+  const [totalBarEarningsToday, setTotalBarEarningsToday] = useState<number>(initialTotalEarnings);
+  const [settledToday, setSettledToday] = useState<any[]>(initialSettledToday);
+  const [activeTabSubView, setActiveTabSubView] = useState<"TABLES" | "KITCHEN" | "CLOSING">(initialView);
 
-  // Selected Table for Tab Details / Add Items
-  const [selectedTable, setSelectedTable] = useState<any | null>(null);
+  // Selected Table for Tab Details / Add Items - track with ref and functional update to prevent polling reset
+  const selectedTableIdRef = React.useRef<string | null>(initialSelectedTableId || null);
+  const [selectedTable, setSelectedTable] = useState<any | null>(() => {
+    if (initialTables && initialTables.length > 0) {
+      if (initialSelectedTableId) {
+        const matching = initialTables.find((t: any) => t.id === initialSelectedTableId);
+        if (matching) return matching;
+      }
+      return initialTables[0];
+    }
+    return null;
+  });
+
+  // Keep selectedTableIdRef in sync whenever selectedTable changes
+  useEffect(() => {
+    if (selectedTable?.id) {
+      selectedTableIdRef.current = selectedTable.id;
+    }
+  }, [selectedTable]);
+
   const [showOpenTabModal, setShowOpenTabModal] = useState(false);
   const [openTabMemberId, setOpenTabMemberId] = useState<string>("");
   const [openTabGuestName, setOpenTabGuestName] = useState<string>("");
 
   // Add Item to Tab Modal
   const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const selectedMenuItemIdRef = React.useRef<string>("");
   const [selectedMenuItemId, setSelectedMenuItemId] = useState<string>("");
+
+  useEffect(() => {
+    if (selectedMenuItemId) {
+      selectedMenuItemIdRef.current = selectedMenuItemId;
+    }
+  }, [selectedMenuItemId]);
+
   const [itemQty, setItemQty] = useState(1);
   const [kitchenNotes, setKitchenNotes] = useState("");
 
   // Payment Modal for Settling Tab
   const [settlingTab, setSettlingTab] = useState<any | null>(null);
+
+  // Selection Handlers to preserve user selections
+  const handleSelectTable = (table: any) => {
+    selectedTableIdRef.current = table?.id || null;
+    setSelectedTable(table);
+    onTableSelect?.(table);
+  };
+
+  const handleSelectMenuItem = (menuItemId: string) => {
+    selectedMenuItemIdRef.current = menuItemId;
+    setSelectedMenuItemId(menuItemId);
+  };
 
   // Fetch Data
   const fetchData = async () => {
@@ -61,41 +132,77 @@ export function BarScene() {
       const tabsData = await tabsRes.json();
 
       if (tablesData.success) {
-        setTables(tablesData.tables);
-        // keep selectedTable in sync
-        if (selectedTable) {
-          const freshSelected = tablesData.tables.find((t: any) => t.id === selectedTable.id);
-          if (freshSelected) setSelectedTable(freshSelected);
-        } else if (tablesData.tables.length > 0) {
-          setSelectedTable(tablesData.tables[0]);
-        }
+        const tableList = tablesData.tables || [];
+        setTables(tableList);
+        // keep selectedTable in sync without resetting active user selection across polls
+        setSelectedTable((prevSelected: any) => {
+          const currentId = selectedTableIdRef.current || prevSelected?.id;
+          if (currentId) {
+            const freshSelected = tableList.find((t: any) => t.id === currentId);
+            if (freshSelected) {
+              selectedTableIdRef.current = freshSelected.id;
+              return freshSelected;
+            }
+          }
+          // Only select tables[0] on initial load when no table is currently selected,
+          // or if the previously selected table was deleted
+          const defaultTable = tableList.length > 0 ? tableList[0] : null;
+          selectedTableIdRef.current = defaultTable?.id || null;
+          return defaultTable;
+        });
       }
       if (menuData.success) {
-        setMenuItems(menuData.menuItems);
-        if (!selectedMenuItemId && menuData.menuItems.length > 0) {
-          setSelectedMenuItemId(menuData.menuItems[0].id);
-        }
+        const menuList = menuData.menuItems || [];
+        setMenuItems(menuList);
+        setSelectedMenuItemId((prev: string) => {
+          const currentId = selectedMenuItemIdRef.current || prev;
+          if (currentId && menuList.some((m: any) => m.id === currentId)) {
+            selectedMenuItemIdRef.current = currentId;
+            return currentId;
+          }
+          const defaultItem = menuList.length > 0 ? menuList[0].id : "";
+          selectedMenuItemIdRef.current = defaultItem;
+          return defaultItem;
+        });
       }
       if (membersData.success) {
-        setMembers(membersData.members);
+        setMembers(membersData.members || []);
       }
       if (tabsData.success) {
-        setOpenTabs(tabsData.openTabs);
-        setKitchenQueue(tabsData.kitchenQueue);
-        setTotalBarEarningsToday(tabsData.totalBarEarningsToday);
-        setSettledToday(tabsData.settledToday);
+        const tabsList = tabsData.openTabs || [];
+        setOpenTabs(tabsList);
+        setKitchenQueue(tabsData.kitchenQueue || []);
+        setTotalBarEarningsToday(Number(tabsData.totalBarEarningsToday) || 0);
+        setSettledToday(tabsData.settledToday || []);
+        setSettlingTab((prev: any) => {
+          if (!prev) return null;
+          const fresh = tabsList.find((t: any) => t.id === prev.id);
+          return fresh || prev;
+        });
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Polling every 3.5 seconds
+  // Polling interval
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 3500);
+    const interval = setInterval(fetchData, pollIntervalMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollIntervalMs]);
+
+  // Expose handlers for component lifecycle tests and programmatic selections
+  useEffect(() => {
+    if (tableSelectRef) tableSelectRef.current = handleSelectTable;
+    if (menuSelectRef) menuSelectRef.current = handleSelectMenuItem;
+    if (settleTabRef) settleTabRef.current = (tab: any) => setSettlingTab(tab);
+  }, [tableSelectRef, menuSelectRef, settleTabRef]);
+
+  // Hook for observability of table and selection state
+  useEffect(() => {
+    onDataLoaded?.({ tables, selectedTable, selectedMenuItemId, settlingTab });
+  }, [tables, selectedTable, selectedMenuItemId, settlingTab]);
 
   // Action: Open New Tab
   const handleOpenTab = async () => {
@@ -117,7 +224,7 @@ export function BarScene() {
         setOpenTabGuestName("");
         fetchData();
       } else {
-        alert(data.error);
+        alert(data.error || "Failed to open tab");
       }
     } catch (err) {
       console.error(err);
@@ -149,7 +256,7 @@ export function BarScene() {
         setItemQty(1);
         fetchData();
       } else {
-        alert(data.error);
+        alert(data.error || "Failed to open tab");
       }
     } catch (err) {
       console.error(err);
@@ -204,7 +311,7 @@ export function BarScene() {
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <UtensilsCrossed className="w-3.5 h-3.5" /> Table Tabs ({openTabs.length})
+            <UtensilsCrossed className="w-3.5 h-3.5" /> Table Tabs ({(openTabs || []).length})
           </button>
 
           <button
@@ -215,7 +322,7 @@ export function BarScene() {
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <ChefHat className="w-3.5 h-3.5" /> Kitchen Queue ({kitchenQueue.length})
+            <ChefHat className="w-3.5 h-3.5" /> Kitchen Queue ({(kitchenQueue || []).length})
           </button>
 
           <button
@@ -236,14 +343,14 @@ export function BarScene() {
         <div className="space-y-6">
           {/* 6 Tables Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {tables.map((table) => {
+            {(tables || []).map((table) => {
               const hasOpenTab = table.tabs && table.tabs.length > 0;
               const isSelected = selectedTable?.id === table.id;
 
               return (
                 <div
                   key={table.id}
-                  onClick={() => setSelectedTable(table)}
+                  onClick={() => handleSelectTable(table)}
                   className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
                     isSelected
                       ? "ring-2 ring-amber-500 bg-slate-800/90 border-amber-500"
@@ -274,7 +381,7 @@ export function BarScene() {
                   <div className="mt-3 pt-2 border-t border-slate-800/60 flex justify-between items-center">
                     {hasOpenTab ? (
                       <span className="text-xs font-mono font-bold text-amber-400">
-                        {formatCurrency(table.tabs[0].finalAmount)}
+                        {formatCurrency(table.tabs?.[0]?.finalAmount || 0)}
                       </span>
                     ) : (
                       <span className="text-[10px] text-emerald-500 font-semibold">Available</span>
@@ -316,7 +423,7 @@ export function BarScene() {
                           className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950 flex items-center gap-1.5"
                         >
                           <Receipt className="w-3.5 h-3.5" /> Settle Tab (
-                          {formatCurrency(activeTabOnSelectedTable.finalAmount)})
+                          {formatCurrency(activeTabOnSelectedTable.finalAmount || 0)})
                         </button>
                       </div>
                     ) : (
@@ -337,16 +444,17 @@ export function BarScene() {
                           <span className="text-slate-400">Billed to: </span>
                           <span className="font-bold text-white">
                             {activeTabOnSelectedTable.member?.name ||
-                              activeTabOnSelectedTable.guestName}
+                              activeTabOnSelectedTable.guestName ||
+                              "Bar Guests"}
                           </span>
                           {activeTabOnSelectedTable.member && (
                             <span className="text-amber-400 font-mono text-[11px] ml-2">
-                              [{activeTabOnSelectedTable.member.planTier} MEMBER]
+                              [{activeTabOnSelectedTable.member?.planTier || "STANDARD"} MEMBER]
                             </span>
                           )}
                         </div>
                         <span className="text-slate-500 text-[11px] font-mono">
-                          Opened: {formatTime(activeTabOnSelectedTable.openedAt)}
+                          Opened: {activeTabOnSelectedTable.openedAt ? formatTime(activeTabOnSelectedTable.openedAt) : "-"}
                         </span>
                       </div>
 
@@ -356,12 +464,12 @@ export function BarScene() {
                           Ordered Items & Kitchen Status:
                         </h4>
 
-                        {activeTabOnSelectedTable.items.length === 0 ? (
+                        {!activeTabOnSelectedTable.items || activeTabOnSelectedTable.items.length === 0 ? (
                           <div className="p-6 text-center text-slate-500 text-xs">
                             No items ordered on this tab yet. Click "+ Add Food/Drinks" above.
                           </div>
                         ) : (
-                          activeTabOnSelectedTable.items.map((item: any) => (
+                          (activeTabOnSelectedTable.items || []).map((item: any) => (
                             <div
                               key={item.id}
                               className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs flex items-center justify-between"
@@ -369,7 +477,7 @@ export function BarScene() {
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-semibold text-white">
-                                    {item.menuItem.name}
+                                    {item.menuItem?.name || "Item"}
                                   </span>
                                   <span className="text-slate-400 font-mono">
                                     × {item.quantity}
@@ -395,7 +503,7 @@ export function BarScene() {
                                   {item.kitchenStatus}
                                 </span>
                                 <span className="font-mono font-bold text-white min-w-[60px] text-right">
-                                  {formatCurrency(item.totalPrice)}
+                                  {formatCurrency(item.totalPrice || 0)}
                                 </span>
                               </div>
                             </div>
@@ -407,9 +515,9 @@ export function BarScene() {
                       <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 space-y-2 text-xs">
                         <div className="flex justify-between text-slate-400">
                           <span>Subtotal:</span>
-                          <span>{formatCurrency(activeTabOnSelectedTable.subtotal)}</span>
+                          <span>{formatCurrency(activeTabOnSelectedTable.subtotal || 0)}</span>
                         </div>
-                        {activeTabOnSelectedTable.discountAmount > 0 && (
+                        {(activeTabOnSelectedTable.discountAmount || 0) > 0 && (
                           <div className="flex justify-between text-emerald-400 font-medium">
                             <span>
                               Member Discount (
@@ -420,17 +528,17 @@ export function BarScene() {
                                 : "5%"}
                               ):
                             </span>
-                            <span>-{formatCurrency(activeTabOnSelectedTable.discountAmount)}</span>
+                            <span>-{formatCurrency(activeTabOnSelectedTable.discountAmount || 0)}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-slate-400">
                           <span>GST (5%):</span>
-                          <span>{formatCurrency(activeTabOnSelectedTable.taxAmount)}</span>
+                          <span>{formatCurrency(activeTabOnSelectedTable.taxAmount || 0)}</span>
                         </div>
                         <div className="flex justify-between text-base font-extrabold text-white pt-2 border-t border-slate-800">
                           <span>Total Amount Due:</span>
                           <span className="text-amber-400">
-                            {formatCurrency(activeTabOnSelectedTable.finalAmount)}
+                            {formatCurrency(activeTabOnSelectedTable.finalAmount || 0)}
                           </span>
                         </div>
                       </div>
@@ -461,7 +569,7 @@ export function BarScene() {
               </p>
 
               <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-                {menuItems.map((item) => (
+                {(menuItems || []).map((item) => (
                   <div
                     key={item.id}
                     className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 hover:border-slate-700 flex justify-between items-center transition text-xs"
@@ -475,12 +583,12 @@ export function BarScene() {
 
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold text-amber-400">
-                        {formatCurrency(item.price)}
+                        {formatCurrency(item.price || 0)}
                       </span>
                       {activeTabOnSelectedTable && (
                         <button
                           onClick={() => {
-                            setSelectedMenuItemId(item.id);
+                            handleSelectMenuItem(item.id);
                             setShowAddItemModal(true);
                           }}
                           className="p-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition"
@@ -509,18 +617,18 @@ export function BarScene() {
               </h2>
             </div>
             <span className="text-xs text-slate-400">
-              {kitchenQueue.length} Active Ticket(s) in Prep
+              {(kitchenQueue || []).length} Active Ticket(s) in Prep
             </span>
           </div>
 
-          {kitchenQueue.length === 0 ? (
+          {!kitchenQueue || kitchenQueue.length === 0 ? (
             <div className="py-16 text-center text-slate-500 space-y-2">
               <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-600/40" />
               <p className="text-sm">Kitchen is all caught up! No pending food order tickets.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {kitchenQueue.map((item) => {
+              {(kitchenQueue || []).map((item) => {
                 const isReady = item.kitchenStatus === "READY";
                 return (
                   <div
@@ -533,7 +641,7 @@ export function BarScene() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-amber-400 font-mono">
-                        {item.tab.table.name}
+                        {item.tab?.table?.name || "Quick Bar / Counter"}
                       </span>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -548,7 +656,7 @@ export function BarScene() {
 
                     <div>
                       <h4 className="text-sm font-bold text-white">
-                        {item.quantity} × {item.menuItem.name}
+                        {item.quantity} × {item.menuItem?.name || "Item"}
                       </h4>
                       {item.kitchenNotes && (
                         <p className="text-xs text-amber-400/90 mt-1 italic">
@@ -556,7 +664,7 @@ export function BarScene() {
                         </p>
                       )}
                       <p className="text-[10px] text-slate-500 mt-1">
-                        Ordered at: {formatTime(item.orderedAt)}
+                        Ordered at: {item.orderedAt ? formatTime(item.orderedAt) : "-"}
                       </p>
                     </div>
 
@@ -600,7 +708,7 @@ export function BarScene() {
             <div className="text-right">
               <p className="text-xs text-slate-400">Total Bar Revenue Today</p>
               <p className="text-2xl font-extrabold text-emerald-400">
-                {formatCurrency(totalBarEarningsToday)}
+                {formatCurrency(totalBarEarningsToday || 0)}
               </p>
             </div>
           </div>
@@ -619,19 +727,21 @@ export function BarScene() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {settledToday.length === 0 ? (
+                {!settledToday || settledToday.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-6 text-center text-slate-500">
                       No bar tabs have been closed yet today.
                     </td>
                   </tr>
                 ) : (
-                  settledToday.map((tab) => (
-                    <tr key={tab.id} className="hover:bg-slate-800/40">
+                  (settledToday || []).map((tab, idx) => (
+                    <tr key={tab.id || idx} className="hover:bg-slate-800/40">
                       <td className="py-3 px-3 font-mono font-medium text-white">
-                        {tab.tabNumber}
+                        {tab.tabNumber || "TAB"}
                       </td>
-                      <td className="py-3 px-3 text-slate-300 font-semibold">{tab.table.name}</td>
+                      <td className="py-3 px-3 text-slate-300 font-semibold">
+                        {tab.table?.name || "Quick Bar / Counter"}
+                      </td>
                       <td className="py-3 px-3 text-slate-300">
                         {tab.member?.name || tab.guestName || "Walk-in"}
                       </td>
@@ -644,7 +754,7 @@ export function BarScene() {
                         {tab.closedAt ? formatTime(tab.closedAt) : "-"}
                       </td>
                       <td className="py-3 px-3 text-right font-bold text-emerald-400 font-mono">
-                        {formatCurrency(tab.finalAmount)}
+                        {formatCurrency(tab.finalAmount || 0)}
                       </td>
                     </tr>
                   ))
@@ -661,7 +771,7 @@ export function BarScene() {
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-base font-bold text-white">
-                Open Running Tab for {selectedTable.name}
+                Open Running Tab for {selectedTable?.name || "Table"}
               </h3>
               <button
                 onClick={() => setShowOpenTabModal(false)}
@@ -680,9 +790,9 @@ export function BarScene() {
                   className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
                 >
                   <option value="">Non-Member / Walk-In Guests</option>
-                  {members.map((m) => (
+                  {(members || []).map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name} ({m.planTier} - {m.plan.barDiscountPercent}% Off Bar)
+                      {m.name} ({m.planTier || "STANDARD"} - {m.plan?.barDiscountPercent ?? 0}% Off Bar)
                     </option>
                   ))}
                 </select>
@@ -741,12 +851,12 @@ export function BarScene() {
                 <label className="text-xs text-slate-400">Menu Item</label>
                 <select
                   value={selectedMenuItemId}
-                  onChange={(e) => setSelectedMenuItemId(e.target.value)}
+                  onChange={(e) => handleSelectMenuItem(e.target.value)}
                   className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
                 >
-                  {menuItems.map((item) => (
+                  {(menuItems || []).map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name} ({formatCurrency(item.price)}) - {item.category}
+                      {item.name} ({formatCurrency(item.price || 0)}) - {item.category}
                     </option>
                   ))}
                 </select>
@@ -799,9 +909,9 @@ export function BarScene() {
         <PaymentModal
           isOpen={!!settlingTab}
           onClose={() => setSettlingTab(null)}
-          amount={settlingTab.finalAmount}
-          title={`Settle Bar Tab - ${settlingTab.table?.name}`}
-          notes={`Bar bill settled: Tab #${settlingTab.tabNumber} (${settlingTab.items?.length || 0} items)`}
+          amount={settlingTab.finalAmount || 0}
+          title={`Settle Bar Tab - ${settlingTab.table?.name || "Quick Bar / Counter"}`}
+          notes={`Bar bill settled: Tab #${settlingTab.tabNumber || ""} (${settlingTab.items?.length || 0} items)`}
           type="BAR_BILL"
           category="BAR"
           barTabId={settlingTab.id}

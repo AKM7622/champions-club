@@ -21,7 +21,17 @@ import { formatCurrency, formatTime, formatDate } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
 import { setHours, setMinutes, format } from "date-fns";
 
-export function CourtScene() {
+interface CourtSceneProps {
+  pollIntervalMs?: number;
+  onDataLoaded?: (data: { members: any[]; selectedMemberId: string }) => void;
+  memberSelectRef?: React.MutableRefObject<((memberId: string) => void) | null>;
+}
+
+export function CourtScene({
+  pollIntervalMs = 3500,
+  onDataLoaded,
+  memberSelectRef,
+}: CourtSceneProps = {}) {
   const [courts, setCourts] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
@@ -61,10 +71,14 @@ export function CourtScene() {
       if (courtsData.success) setCourts(courtsData.courts);
       if (bookingsData.success) setBookings(bookingsData.bookings);
       if (membersData.success) {
-        setMembers(membersData.members);
-        if (!selectedMemberId && membersData.members.length > 0) {
-          setSelectedMemberId(membersData.members[0].id);
-        }
+        const memList = membersData.members || [];
+        setMembers(memList);
+        setSelectedMemberId((prev) => {
+          if (prev && memList.some((m: any) => m.id === prev)) {
+            return prev;
+          }
+          return memList.length > 0 ? memList[0].id : "";
+        });
       }
     } catch (err) {
       console.error(err);
@@ -73,12 +87,22 @@ export function CourtScene() {
     }
   };
 
-  // Real-time polling every 3.5 seconds
+  // Expose member select handler for test harnesses
+  useEffect(() => {
+    if (memberSelectRef) memberSelectRef.current = (mId: string) => setSelectedMemberId(mId);
+  }, [memberSelectRef]);
+
+  // Hook for observability
+  useEffect(() => {
+    onDataLoaded?.({ members, selectedMemberId });
+  }, [members, selectedMemberId]);
+
+  // Real-time polling
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 3500);
+    const interval = setInterval(fetchData, pollIntervalMs);
     return () => clearInterval(interval);
-  }, [selectedDate]);
+  }, [selectedDate, pollIntervalMs]);
 
   // Generate 30-min sliding time slots from 06:00 to 22:00
   const timeSlots: string[] = [];
@@ -571,7 +595,7 @@ export function CourtScene() {
                   </select>
                   {selectedMemberObj && (
                     <p className="text-[11px] text-emerald-400 mt-1">
-                      Plan Benefit: {selectedMemberObj.plan.courtDiscountPercent}% Court Discount
+                      Plan Benefit: {selectedMemberObj.plan?.courtDiscountPercent ?? 0}% Court Discount
                       (Max 2/day limit applies).
                     </p>
                   )}

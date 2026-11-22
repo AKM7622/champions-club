@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const randomSuffix = `${Date.now().toString().slice(-4)}${Math.floor(1000 + Math.random() * 9000)}`;
     const referenceNo = `TXN-${yearMonth}-${randomSuffix}`;
 
     // Execute in transaction to guarantee ledger consistency
@@ -135,18 +135,20 @@ export async function POST(req: NextRequest) {
         });
 
         // Set table to AVAILABLE if no other open tabs exist
-        const remainingTabs = await tx.barTab.count({
-          where: {
-            tableId: tab.tableId,
-            status: "OPEN",
-          },
-        });
-
-        if (remainingTabs === 0) {
-          await tx.barTable.update({
-            where: { id: tab.tableId },
-            data: { status: "AVAILABLE" },
+        if (tab.tableId) {
+          const remainingTabs = await tx.barTab.count({
+            where: {
+              tableId: tab.tableId,
+              status: "OPEN",
+            },
           });
+
+          if (remainingTabs === 0) {
+            await tx.barTable.update({
+              where: { id: tab.tableId },
+              data: { status: "AVAILABLE" },
+            });
+          }
         }
       }
 

@@ -28,6 +28,9 @@ export interface PaymentModalProps {
   shopOrderId?: string;
   barTabId?: string;
   onSuccess?: (transaction: any) => void;
+  onProcessPayment?: (method: "UPI" | "CARD" | "CASH") => Promise<any>;
+  successButtonText?: string;
+  onFinish?: () => void;
 }
 
 export function PaymentModal({
@@ -44,6 +47,9 @@ export function PaymentModal({
   shopOrderId,
   barTabId,
   onSuccess,
+  onProcessPayment,
+  successButtonText,
+  onFinish,
 }: PaymentModalProps) {
   const [method, setMethod] = useState<"UPI" | "CARD" | "CASH">("UPI");
   const [cashTendered, setCashTendered] = useState<string>(String(amount));
@@ -60,6 +66,16 @@ export function PaymentModal({
     try {
       // 1-second simulated confirmation gate as required by prompt
       await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      if (onProcessPayment) {
+        const result = await onProcessPayment(method);
+        const txn = result?.transaction || result;
+        setCompletedTxn(txn);
+        if (onSuccess) {
+          onSuccess(txn);
+        }
+        return;
+      }
 
       const payload = {
         type,
@@ -98,7 +114,11 @@ export function PaymentModal({
 
   const handleFinish = () => {
     setCompletedTxn(null);
-    onClose();
+    if (onFinish) {
+      onFinish();
+    } else {
+      onClose();
+    }
   };
 
   const cashChange = Math.max(0, Number(cashTendered) - amount);
@@ -163,7 +183,7 @@ export function PaymentModal({
               onClick={handleFinish}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition shadow-lg shadow-emerald-900/30"
             >
-              Done & Close
+              {successButtonText || "Done & Close"}
             </button>
           </div>
         ) : (

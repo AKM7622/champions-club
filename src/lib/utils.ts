@@ -5,12 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number): string {
+export function formatCurrency(amount?: number | null): string {
+  const safeAmount = typeof amount === "number" && !isNaN(amount) ? amount : 0;
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(safeAmount);
 }
 
 export function formatDate(date: string | Date): string {
@@ -27,4 +28,19 @@ export function formatTime(date: string | Date): string {
     minute: "2-digit",
     hour12: true,
   });
+}
+
+// Compute safe redirect destination (strictly allow internal relative paths, reject external/malformed URLs)
+export function computeSafeDestination(url: string | null | undefined): string {
+  if (!url) return "/";
+  const trimmed = url.trim();
+  if (
+    !trimmed.startsWith("/") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("/\\") ||
+    trimmed.startsWith("/login")
+  ) {
+    return "/";
+  }
+  return trimmed;
 }

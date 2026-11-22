@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { LeadStatus, PlanTier, PaymentMethod, MemberStatus, TransactionType, TransactionCategory } from "@prisma/client";
 import { addMonths } from "date-fns";
+import { validateEmail } from "@/lib/email-validator";
 
 export async function GET(req: NextRequest) {
   try {
@@ -24,7 +25,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON request body." },
+        { status: 400 }
+      );
+    }
     const { name, email, phone, interest, notes, trialDate } = body;
 
     if (!name || !email || !phone) {
@@ -34,11 +43,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const emailValidation = await validateEmail(typeof email === "string" ? email.trim() : "");
+    if (!emailValidation.isValid) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            emailValidation.errorCode === "INVALID_SYNTAX"
+              ? "Please provide a valid email address."
+              : emailValidation.error || "The email domain does not exist or has no active mail servers.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const normalizedEmail = (emailValidation.normalizedEmail || (typeof email === "string" ? email.trim() : email)).toLowerCase();
+
     const lead = await prisma.lead.create({
       data: {
-        name,
-        email,
-        phone,
+        name: typeof name === "string" ? name.trim() : name,
+        email: normalizedEmail,
+        phone: typeof phone === "string" ? phone.trim() : phone,
         interest: interest || "General Club Membership & Trial",
         notes: notes || "Submitted via online club portal",
         trialDate: trialDate ? new Date(trialDate) : null,
@@ -101,7 +126,13 @@ export async function PATCH(req: NextRequest) {
       const now = new Date();
       const count = await prisma.member.count();
       const tierPrefix = planTier === PlanTier.GOLD ? "CC-1" : planTier === PlanTier.SILVER ? "CC-2" : "CC-3";
-      const memberNumber = `${tierPrefix}${String(count + 1).padStart(3, "0")}`;
+      let suffix = count + 1;
+      let candidate = `${tierPrefix}${String(suffix).padStart(3, "0")}`;
+      while (await prisma.member.findUnique({ where: { memberNumber: candidate } })) {
+        suffix++;
+        candidate = `${tierPrefix}${String(suffix).padStart(3, "0")}`;
+      }
+      const memberNumber = candidate;
 
       const result = await prisma.$transaction(async (tx) => {
         // Create member
@@ -129,7 +160,7 @@ export async function PATCH(req: NextRequest) {
         });
 
         // Record in ledger
-        const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Math.floor(
+        const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Date.now().toString().slice(-4)}${Math.floor(
           1000 + Math.random() * 9000
         )}`;
 

@@ -32,14 +32,16 @@ export async function GET(req: NextRequest) {
         closedAt: { gte: todayStart, lte: todayEnd },
       },
       include: {
+        table: true,
         member: true,
         items: { include: { menuItem: true } },
         transaction: true,
       },
+      orderBy: { closedAt: "desc" },
     });
 
-    const totalBarEarningsToday = settledToday.reduce(
-      (sum, tab) => sum + tab.finalAmount,
+    const totalBarEarningsToday = (settledToday || []).reduce(
+      (sum, tab) => sum + (tab.finalAmount || 0),
       0
     );
 
@@ -226,13 +228,21 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.barOrderItem.update({
       where: { id: orderItemId },
       data: dataToUpdate,
-      include: { menuItem: true, tab: { include: { table: true } } },
+      include: {
+        menuItem: true,
+        tab: {
+          include: {
+            table: true,
+            member: { select: { id: true, name: true, memberNumber: true } },
+          },
+        },
+      },
     });
 
     return NextResponse.json({
       success: true,
       orderItem: updated,
-      message: `${updated.menuItem.name} marked as ${kitchenStatus}`,
+      message: `${updated.menuItem?.name || "Item"} marked as ${kitchenStatus}`,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -31,6 +31,16 @@ export interface BarBillCalculation {
   finalAmount: number;
 }
 
+export interface MembershipFeeCalculation {
+  tier: PlanTier;
+  monthlyFee: number;
+  durationMonths: number;
+  basePrice: number;
+  discountPercent: number;
+  discountAmount: number;
+  finalPrice: number;
+}
+
 /**
  * Shared utility routing all court, shop, and bar pricing calculations
  * through MembershipPlan rules.
@@ -141,6 +151,34 @@ export class PricingCalculator {
   }
 
   /**
+   * Calculate Membership Enrollment or Renewal Fee
+   */
+  static calculateMembershipFee(params: {
+    monthlyFee: number;
+    durationMonths: number;
+    tier?: PlanTier;
+    discountPercent?: number;
+  }): MembershipFeeCalculation {
+    const { monthlyFee, durationMonths, tier = PlanTier.GOLD, discountPercent = 0 } = params;
+    const safeMonthlyFee = Math.max(0, Number(monthlyFee) || 0);
+    const validDuration = Math.max(1, Math.floor(Number(durationMonths) || 1));
+    const basePrice = Number((safeMonthlyFee * validDuration).toFixed(2));
+    const validDiscount = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+    const discountAmount = Number(((basePrice * validDiscount) / 100).toFixed(2));
+    const finalPrice = Math.max(0, Number((basePrice - discountAmount).toFixed(2)));
+
+    return {
+      tier,
+      monthlyFee: safeMonthlyFee,
+      durationMonths: validDuration,
+      basePrice,
+      discountPercent: validDiscount,
+      discountAmount,
+      finalPrice,
+    };
+  }
+
+  /**
    * Check membership expiration status
    */
   static getMembershipStatus(expiryDate: Date | string): "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" {
@@ -154,3 +192,6 @@ export class PricingCalculator {
     return "ACTIVE";
   }
 }
+
+export default PricingCalculator;
+

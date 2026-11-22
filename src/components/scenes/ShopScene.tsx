@@ -20,7 +20,17 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
 
-export function ShopScene() {
+interface ShopSceneProps {
+  pollIntervalMs?: number;
+  onDataLoaded?: (data: { members: any[]; selectedMemberId: string }) => void;
+  memberSelectRef?: React.MutableRefObject<((memberId: string) => void) | null>;
+}
+
+export function ShopScene({
+  pollIntervalMs = 3500,
+  onDataLoaded,
+  memberSelectRef,
+}: ShopSceneProps = {}) {
   const [products, setProducts] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
@@ -62,10 +72,14 @@ export function ShopScene() {
 
       if (prodData.success) setProducts(prodData.products);
       if (memData.success) {
-        setMembers(memData.members);
-        if (!selectedMemberId && memData.members.length > 0) {
-          setSelectedMemberId(memData.members[0].id);
-        }
+        const memList = memData.members || [];
+        setMembers(memList);
+        setSelectedMemberId((prev) => {
+          if (prev && memList.some((m: any) => m.id === prev)) {
+            return prev;
+          }
+          return memList.length > 0 ? memList[0].id : "";
+        });
       }
       if (ordData.success) setRecentOrders(ordData.orders);
     } catch (err) {
@@ -75,12 +89,22 @@ export function ShopScene() {
     }
   };
 
-  // Polling every 3.5 seconds
+  // Expose member select handler for test harnesses
+  useEffect(() => {
+    if (memberSelectRef) memberSelectRef.current = (mId: string) => setSelectedMemberId(mId);
+  }, [memberSelectRef]);
+
+  // Hook for observability
+  useEffect(() => {
+    onDataLoaded?.({ members, selectedMemberId });
+  }, [members, selectedMemberId]);
+
+  // Polling
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 3500);
+    const interval = setInterval(fetchData, pollIntervalMs);
     return () => clearInterval(interval);
-  }, [search, selectedCategory]);
+  }, [search, selectedCategory, pollIntervalMs]);
 
   // Cart operations
   const addToCart = (productId: string) => {
@@ -126,7 +150,7 @@ export function ShopScene() {
 
   // Calculations
   const selectedMember = members.find((m) => m.id === selectedMemberId);
-  const discountPercent = selectedMember ? selectedMember.plan.shopDiscountPercent : 0;
+  const discountPercent = selectedMember?.plan?.shopDiscountPercent ?? 0;
 
   const cartItemsList = Object.entries(cart).map(([productId, quantity]) => {
     const product = products.find((p) => p.id === productId);
@@ -377,7 +401,7 @@ export function ShopScene() {
                 <option value="">Non-Member / Walk-In (0% Discount)</option>
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} ({m.planTier} - {m.plan.shopDiscountPercent}% Off)
+                    {m.name} ({m.planTier || "STANDARD"} - {m.plan?.shopDiscountPercent ?? 0}% Off)
                   </option>
                 ))}
               </select>

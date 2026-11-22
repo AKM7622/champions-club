@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     const phone = member ? member.phone : customerPhone || "+91 99999 00000";
 
     const now = new Date();
-    const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Math.floor(
+    const orderNumber = `ORD-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Date.now().toString().slice(-4)}${Math.floor(
       1000 + Math.random() * 9000
     )}`;
 
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       });
 
       // 3. Create Ledger Entry
-      const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Math.floor(
+      const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Date.now().toString().slice(-4)}${Math.floor(
         1000 + Math.random() * 9000
       )}`;
 

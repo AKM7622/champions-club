@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   ExternalLink,
   Flame,
+  AlertTriangle,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -38,6 +39,7 @@ export function OnlineScene() {
     notes: "Looking to check out floodlit tennis courts this week.",
   });
   const [trialSuccessMsg, setTrialSuccessMsg] = useState<string | null>(null);
+  const [trialErrorMsg, setTrialErrorMsg] = useState<string | null>(null);
 
   // Staff Quote & Conversion Modal
   const [quotingLead, setQuotingLead] = useState<any | null>(null);
@@ -81,6 +83,8 @@ export function OnlineScene() {
   // Submit Public Trial Request
   const handleVisitorSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTrialErrorMsg(null);
+    setTrialSuccessMsg(null);
     try {
       const res = await fetch("/api/leads", {
         method: "POST",
@@ -91,6 +95,7 @@ export function OnlineScene() {
       const data = await res.json();
       if (data.success) {
         setTrialSuccessMsg("🎉 Trial session booked! Staff notified in the CRM pipeline.");
+        setTrialErrorMsg(null);
         setVisitorForm({
           name: "",
           email: "",
@@ -101,9 +106,12 @@ export function OnlineScene() {
         });
         fetchData();
         setTimeout(() => setTrialSuccessMsg(null), 6000);
+      } else {
+        setTrialErrorMsg(data.error || "Failed to submit trial inquiry.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setTrialErrorMsg("Network error. Please try again.");
     }
   };
 
@@ -229,10 +237,10 @@ export function OnlineScene() {
                   Book a Trial Session
                 </a>
                 <a
-                  href="#membership-plans"
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs border border-slate-700 transition"
+                  href="/memberships"
+                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-950"
                 >
-                  Explore Membership Plans
+                  Buy Membership Online →
                 </a>
               </div>
             </div>
@@ -293,18 +301,26 @@ export function OnlineScene() {
                       </div>
                     </div>
 
-                    <a
-                      href="#book-trial"
-                      onClick={() =>
-                        setVisitorForm({
-                          ...visitorForm,
-                          interest: `${p.name} Membership Inquiry`,
-                        })
-                      }
-                      className="mt-6 w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-xl text-xs font-semibold text-center transition"
-                    >
-                      Inquire About {p.name}
-                    </a>
+                    <div className="mt-6 flex flex-col gap-2">
+                      <a
+                        href={`/memberships?tier=${p.tier}`}
+                        className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs text-center transition shadow-md shadow-emerald-950"
+                      >
+                        Buy {p.name} Online
+                      </a>
+                      <a
+                        href="#book-trial"
+                        onClick={() =>
+                          setVisitorForm({
+                            ...visitorForm,
+                            interest: `${p.name} Membership Inquiry`,
+                          })
+                        }
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-semibold text-center transition"
+                      >
+                        Inquire About Trial
+                      </a>
+                    </div>
                   </div>
                 );
               })}
@@ -364,6 +380,12 @@ export function OnlineScene() {
                 </div>
               ) : (
                 <form onSubmit={handleVisitorSubmit} className="space-y-3 text-xs">
+                  {trialErrorMsg && (
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{trialErrorMsg}</span>
+                    </div>
+                  )}
                   <div>
                     <label className="text-slate-400">Your Full Name</label>
                     <input

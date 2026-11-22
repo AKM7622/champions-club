@@ -7,6 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  OWNER
+  FRONT_DESK
+  PRO_SHOP
+  BAR_STAFF
+  CHEF
+  COACH
+  MEMBER
+}
+
+enum AuthEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGOUT
+  PASSWORD_CHANGE
+  RATE_LIMITED
+}
+
 enum PlanTier {
   GOLD
   SILVER
@@ -127,6 +145,51 @@ enum LeaveStatus {
   REJECTED
 }
 
+// 0. Unified Authentication & Session Layer
+model User {
+  id        String         @id @default(uuid())
+  email     String         @unique
+  password  String         // bcrypt hash
+  name      String
+  role      UserRole
+  staffId   String?        @unique
+  staff     StaffMember?   @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  memberId  String?        @unique
+  member    Member?        @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  sessions  Session[]
+  auditLogs AuthAuditLog[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([sessionToken])
+  @@index([userId])
+}
+
+model AuthAuditLog {
+  id        String        @id @default(uuid())
+  eventType AuthEventType
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String?
+  ipAddress String?
+  userAgent String?
+  details   String?
+  createdAt DateTime      @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
 // 1. CRM & Membership Engine
 model MembershipPlan {
   id                    String        @id @default(uuid())
@@ -157,6 +220,7 @@ model Member {
   expiryDate      DateTime
   status          MemberStatus    @default(ACTIVE)
   notes           String?
+  user            User?
   courtBookings   CourtBooking[]
   shopOrders      ShopOrder[]
   barTabs         BarTab[]
@@ -361,6 +425,7 @@ model StaffMember {
   email           String          @unique
   hourlyWage      Float           @default(150)
   monthlySalary   Float           @default(35000)
+  user            User?
   shifts          Shift[]
   leaves          Leave[]
   createdAt       DateTime        @default(now())

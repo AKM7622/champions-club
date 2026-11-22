@@ -1,0 +1,18 @@
+{
+  "all": true,
+  "include": [
+    "src/lib/**",
+    "src/middleware.ts",
+    "src/app/api/**"
+  ],
+  "exclude": [
+    "**/*.d.ts",
+    "tests/**",
+    "node_modules/**"
+  ],
+  "reporter": [
+    "text",
+    "text-summary",
+    "lcov"
+  ]
+}

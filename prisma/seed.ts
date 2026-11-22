@@ -1,5 +1,6 @@
 import {
   PrismaClient,
+  UserRole,
   PlanTier,
   MemberStatus,
   SportType,
@@ -20,12 +21,16 @@ import {
   LeaveStatus,
 } from "@prisma/client";
 import { subDays, addDays, addMonths, setHours, setMinutes } from "date-fns";
+import bcrypt from "bcryptjs";
 import { PricingCalculator } from "../src/lib/pricing-calculator";
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("🌱 Cleaning existing database...");
+  await prisma.session.deleteMany({});
+  await prisma.authAuditLog.deleteMany({});
+  await prisma.user.deleteMany({});
   await prisma.barOrderItem.deleteMany({});
   await prisma.barTab.deleteMany({});
   await prisma.barMenuItem.deleteMany({});
@@ -957,6 +962,99 @@ async function main() {
       },
     ],
   });
+
+  console.log("🔐 10. Seeding User Accounts & Passwords for Authentication...");
+  const defaultPasswordHash = await bcrypt.hash("password123", 10);
+
+  // 1. Staff Users
+  // Farhan Merchant (Owner/Manager)
+  await prisma.user.create({
+    data: {
+      email: "farhan.m@champions.club",
+      password: defaultPasswordHash,
+      name: "Farhan Merchant",
+      role: UserRole.OWNER,
+      staffId: createdStaff[5].id,
+    },
+  });
+
+  // Sunil Gavaskar K. (Front Desk)
+  await prisma.user.create({
+    data: {
+      email: "sunil.k@champions.club",
+      password: defaultPasswordHash,
+      name: "Sunil Gavaskar K.",
+      role: UserRole.FRONT_DESK,
+      staffId: createdStaff[0].id,
+    },
+  });
+
+  // Devika Rao (Front Desk)
+  await prisma.user.create({
+    data: {
+      email: "devika.r@champions.club",
+      password: defaultPasswordHash,
+      name: "Devika Rao",
+      role: UserRole.FRONT_DESK,
+      staffId: createdStaff[1].id,
+    },
+  });
+
+  // Manoj Barista (Bar & Cafe)
+  await prisma.user.create({
+    data: {
+      email: "manoj.b@champions.club",
+      password: defaultPasswordHash,
+      name: "Manoj Barista",
+      role: UserRole.BAR_STAFF,
+      staffId: createdStaff[3].id,
+    },
+  });
+
+  // Chef Harish Rawat (Kitchen Chef)
+  await prisma.user.create({
+    data: {
+      email: "harish.r@champions.club",
+      password: defaultPasswordHash,
+      name: "Chef Harish Rawat",
+      role: UserRole.CHEF,
+      staffId: createdStaff[2].id,
+    },
+  });
+
+  // Coach Anand Kumar (Head Coach)
+  await prisma.user.create({
+    data: {
+      email: "coach.anand@champions.club",
+      password: defaultPasswordHash,
+      name: "Coach Anand Kumar",
+      role: UserRole.COACH,
+      staffId: createdStaff[4].id,
+    },
+  });
+
+  // Dedicated Pro Shop Attendant
+  await prisma.user.create({
+    data: {
+      email: "proshop@champions.club",
+      password: defaultPasswordHash,
+      name: "Pro Shop Attendant",
+      role: UserRole.PRO_SHOP,
+    },
+  });
+
+  // 2. Member Users for all 15 members
+  for (const member of createdMembers) {
+    await prisma.user.create({
+      data: {
+        email: member.email,
+        password: defaultPasswordHash,
+        name: member.name,
+        role: UserRole.MEMBER,
+        memberId: member.id,
+      },
+    });
+  }
 
   console.log("✅ Seed completed successfully!");
 }

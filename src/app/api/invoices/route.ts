@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const now = new Date();
-    const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Math.floor(
+    const refNo = `TXN-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Date.now().toString().slice(-4)}${Math.floor(
       1000 + Math.random() * 9000
     )}`;
 
