@@ -16,9 +16,12 @@ import {
   Tag,
   ArrowRight,
   ShieldCheck,
+  Pencil,
+  XCircle,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface ShopSceneProps {
   pollIntervalMs?: number;
@@ -31,6 +34,9 @@ export function ShopScene({
   onDataLoaded,
   memberSelectRef,
 }: ShopSceneProps = {}) {
+  const { user } = useAuth();
+  const canManageProducts = user?.role === "OWNER" || user?.role === "PRO_SHOP";
+
   const [products, setProducts] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
@@ -48,6 +54,22 @@ export function ShopScene({
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
+
+  // Product Add / Edit Modal State
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState({
+    name: "",
+    category: "RACKET",
+    price: 3500,
+    stockQuantity: 15,
+    reorderThreshold: 5,
+    description: "",
+    sku: "",
+    imageUrl: "",
+  });
+  const [productModalError, setProductModalError] = useState<string | null>(null);
+  const [isProductSubmitting, setIsProductSubmitting] = useState(false);
 
   // Payment Modal State
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -99,45 +121,51 @@ export function ShopScene({
     onDataLoaded?.({ members, selectedMemberId });
   }, [members, selectedMemberId]);
 
-  // Polling
+  // Real-time polling
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, pollIntervalMs);
     return () => clearInterval(interval);
-  }, [search, selectedCategory, pollIntervalMs]);
+  }, [selectedCategory, search, pollIntervalMs]);
 
   // Cart operations
   const addToCart = (productId: string) => {
-    const prod = products.find((p) => p.id === productId);
-    if (!prod) return;
-    const currentQty = cart[productId] || 0;
-    if (currentQty >= prod.stockQuantity) {
-      alert(`Cannot add more: Only ${prod.stockQuantity} available on the shelf!`);
-      return;
-    }
-    setCart({ ...cart, [productId]: currentQty + 1 });
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+
+    setCart((prev) => {
+      const currentQty = prev[productId] || 0;
+      if (currentQty >= product.stockQuantity) {
+        alert(
+          `Only ${product.stockQuantity} units available on single shelf! Cannot add more.`
+        );
+        return prev;
+      }
+      return { ...prev, [productId]: currentQty + 1 };
+    });
   };
 
   const removeFromCart = (productId: string) => {
-    const currentQty = cart[productId] || 0;
-    if (currentQty <= 1) {
-      const newCart = { ...cart };
-      delete newCart[productId];
-      setCart(newCart);
-    } else {
-      setCart({ ...cart, [productId]: currentQty - 1 });
-    }
+    setCart((prev) => {
+      const currentQty = prev[productId] || 0;
+      if (currentQty <= 1) {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      }
+      return { ...prev, [productId]: currentQty - 1 };
+    });
   };
 
   const clearCart = () => setCart({});
 
-  // Restock product
-  const handleRestock = async (productId: string, qty: number = 10) => {
+  // Single Shelf Restock Simulation
+  const handleRestock = async (productId: string, addedStock: number = 10) => {
     try {
       const res = await fetch("/api/shop/products", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, addedStock: qty }),
+        body: JSON.stringify({ productId, addedStock }),
       });
       const data = await res.json();
       if (data.success) {
@@ -145,6 +173,88 @@ export function ShopScene({
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Open Add Product Modal
+  const handleOpenAddProduct = () => {
+    setEditingProductId(null);
+    setProductForm({
+      name: "",
+      category: "RACKET",
+      price: 2500,
+      stockQuantity: 20,
+      reorderThreshold: 5,
+      description: "",
+      sku: `SKU-${Date.now().toString().slice(-6)}`,
+      imageUrl: "",
+    });
+    setProductModalError(null);
+    setIsProductModalOpen(true);
+  };
+
+  // Open Edit Product Modal
+  const handleOpenEditProduct = (prod: any) => {
+    setEditingProductId(prod.id);
+    setProductForm({
+      name: prod.name,
+      category: prod.category,
+      price: prod.price,
+      stockQuantity: prod.stockQuantity,
+      reorderThreshold: prod.reorderThreshold,
+      description: prod.description || "",
+      sku: prod.sku,
+      imageUrl: prod.imageUrl || "",
+    });
+    setProductModalError(null);
+    setIsProductModalOpen(true);
+  };
+
+  // Save Product (Create or Update)
+  const handleSaveProduct = async () => {
+    setIsProductSubmitting(true);
+    setProductModalError(null);
+
+    try {
+      const method = editingProductId ? "PUT" : "POST";
+      const payload = editingProductId ? { id: editingProductId, ...productForm } : productForm;
+
+      const res = await fetch("/api/shop/products", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to save product");
+      }
+
+      setIsProductModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      setProductModalError(err.message);
+    } finally {
+      setIsProductSubmitting(false);
+    }
+  };
+
+  // Delete Product
+  const handleDeleteProduct = async (productId: string, productName: string) => {
+    if (!confirm(`Are you sure you want to remove "${productName}" from the catalog?`)) return;
+
+    try {
+      const res = await fetch(`/api/shop/products?id=${encodeURIComponent(productId)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || "Failed to delete product");
+        return;
+      }
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || "Network error while deleting product");
     }
   };
 
@@ -223,34 +333,46 @@ export function ShopScene({
           </p>
         </div>
 
-        {/* Channel Toggle */}
-        <div className="flex p-1 bg-slate-950 rounded-xl border border-slate-800">
-          <button
-            onClick={() => {
-              setChannel("COUNTER");
-              setOrderType("IN_STORE");
-            }}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              channel === "COUNTER"
-                ? "bg-slate-800 text-amber-400 shadow"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <Store className="w-3.5 h-3.5" /> Counter Desk POS
-          </button>
-          <button
-            onClick={() => {
-              setChannel("SOFA_ONLINE");
-              setOrderType("ONLINE_COLLECTION");
-            }}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              channel === "SOFA_ONLINE"
-                ? "bg-slate-800 text-emerald-400 shadow"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <Truck className="w-3.5 h-3.5" /> Sofa Online Order
-          </button>
+        <div className="flex items-center gap-3">
+          {canManageProducts && (
+            <button
+              onClick={handleOpenAddProduct}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 font-semibold rounded-xl text-xs transition shadow"
+              title="Add a new gear product to inventory"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Product
+            </button>
+          )}
+
+          {/* Channel Toggle */}
+          <div className="flex p-1 bg-slate-950 rounded-xl border border-slate-800">
+            <button
+              onClick={() => {
+                setChannel("COUNTER");
+                setOrderType("IN_STORE");
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                channel === "COUNTER"
+                  ? "bg-slate-800 text-amber-400 shadow"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Store className="w-3.5 h-3.5" /> Counter Desk POS
+            </button>
+            <button
+              onClick={() => {
+                setChannel("SOFA_ONLINE");
+                setOrderType("ONLINE_COLLECTION");
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                channel === "SOFA_ONLINE"
+                  ? "bg-slate-800 text-emerald-400 shadow"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Truck className="w-3.5 h-3.5" /> Sofa Online Order
+            </button>
+          </div>
         </div>
       </div>
 
@@ -313,7 +435,27 @@ export function ShopScene({
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase">
                       {prod.category}
                     </span>
-                    <span className="font-mono text-[11px] text-slate-500">{prod.sku}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[11px] text-slate-500">{prod.sku}</span>
+                      {canManageProducts && (
+                        <div className="flex items-center gap-1 ml-1 border-l border-slate-800 pl-1.5">
+                          <button
+                            onClick={() => handleOpenEditProduct(prod)}
+                            className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition"
+                            title="Edit Product"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProduct(prod.id, prod.name)}
+                            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition"
+                            title="Delete Product"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="font-bold text-white text-sm leading-snug">{prod.name}</h3>
@@ -370,17 +512,17 @@ export function ShopScene({
           })}
         </div>
 
-        {/* Live Order & Checkout Sidebar */}
-        <div className="lg:col-span-1">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        {/* Omnichannel Cart & Checkout Panel */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  {channel === "COUNTER" ? "Counter POS Checkout" : "Online Sofa Order"}
-                </h3>
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Active POS Cart ({Object.keys(cart).length})
+                </h2>
               </div>
-              {cartItemsList.length > 0 && (
+              {Object.keys(cart).length > 0 && (
                 <button
                   onClick={clearCart}
                   className="text-slate-500 hover:text-rose-400 text-xs flex items-center gap-1"
@@ -390,107 +532,39 @@ export function ShopScene({
               )}
             </div>
 
-            {/* Member Plan Selection for Automatic Discount */}
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">Customer / Member</label>
-              <select
-                value={selectedMemberId}
-                onChange={(e) => setSelectedMemberId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-              >
-                <option value="">Non-Member / Walk-In (0% Discount)</option>
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({m.planTier || "STANDARD"} - {m.plan?.shopDiscountPercent ?? 0}% Off)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Online Delivery / Collection details */}
-            {channel === "SOFA_ONLINE" && (
-              <div className="space-y-2 pt-1 border-t border-slate-800">
-                <label className="text-xs text-slate-400">Fulfillment Method</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setOrderType("ONLINE_COLLECTION")}
-                    className={`py-1.5 px-2 rounded-lg border text-xs font-semibold ${
-                      orderType === "ONLINE_COLLECTION"
-                        ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
-                        : "bg-slate-950 border-slate-800 text-slate-400"
-                    }`}
-                  >
-                    Club Desk Pickup
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOrderType("ONLINE_DELIVERY")}
-                    className={`py-1.5 px-2 rounded-lg border text-xs font-semibold ${
-                      orderType === "ONLINE_DELIVERY"
-                        ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
-                        : "bg-slate-950 border-slate-800 text-slate-400"
-                    }`}
-                  >
-                    Home Delivery
-                  </button>
-                </div>
-
-                {orderType === "ONLINE_DELIVERY" && (
-                  <div>
-                    <label className="text-xs text-slate-400">Home Address</label>
-                    <textarea
-                      rows={2}
-                      placeholder="Flat 402, Palm Meadows, Bangalore"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      className="w-full mt-1 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Cart Items List */}
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            <div className="mt-3 divide-y divide-slate-800/60 max-h-60 overflow-y-auto pr-1">
               {cartItemsList.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs">
-                  Cart is empty. Click "+ Add to Order" on items from the shelf.
-                </div>
+                <p className="text-xs text-slate-500 py-8 text-center">
+                  Cart is currently empty. Tap items from the shelf to sell.
+                </p>
               ) : (
-                cartItemsList.map(({ product, quantity, unitPrice, total }) => {
-                  if (!product) return null;
+                cartItemsList.map((item) => {
+                  if (!item.product) return null;
                   return (
-                    <div
-                      key={product.id}
-                      className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 text-xs flex justify-between items-center"
-                    >
-                      <div className="min-w-0 pr-2">
-                        <p className="font-semibold text-white truncate">{product.name}</p>
-                        <p className="text-[10px] text-slate-400">
-                          {formatCurrency(unitPrice)} × {quantity}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="flex items-center bg-slate-900 rounded-lg border border-slate-800">
-                          <button
-                            onClick={() => removeFromCart(product.id)}
-                            className="p-1 hover:text-rose-400"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="px-1.5 font-mono text-[11px] font-bold">{quantity}</span>
-                          <button
-                            onClick={() => addToCart(product.id)}
-                            className="p-1 hover:text-emerald-400"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-                        <span className="font-bold text-white min-w-[55px] text-right font-mono">
-                          {formatCurrency(total)}
+                    <div key={item.product.id} className="py-2.5 flex justify-between items-center text-xs">
+                      <div className="flex-1 pr-2">
+                        <p className="font-semibold text-white truncate">{item.product.name}</p>
+                        <span className="text-[10px] text-slate-400">
+                          {formatCurrency(item.unitPrice)} each
                         </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => removeFromCart(item.product.id)}
+                          className="w-6 h-6 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center hover:bg-slate-700"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="font-bold text-white font-mono w-4 text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => addToCart(item.product.id)}
+                          className="w-6 h-6 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center hover:bg-slate-700"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
                   );
@@ -498,48 +572,245 @@ export function ShopScene({
               )}
             </div>
 
-            {/* Bill Summary */}
-            {cartItemsList.length > 0 && (
-              <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 space-y-2 text-xs">
-                <div className="flex justify-between text-slate-400">
-                  <span>Subtotal:</span>
-                  <span>{formatCurrency(cartSubtotal)}</span>
+            {/* Customer Details Form */}
+            <div className="mt-4 pt-3 border-t border-slate-800 space-y-3">
+              <div>
+                <label className="text-xs text-slate-400">Club Member (Discount Eligibility)</label>
+                <select
+                  value={selectedMemberId}
+                  onChange={(e) => setSelectedMemberId(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                >
+                  <option value="">Walk-in Non-Member (0% Off)</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.memberNumber}) • {m.planTier} ({m.plan?.shopDiscountPercent}% Off)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!selectedMemberId && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Guest Name"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Phone"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                  />
                 </div>
-                {discountPercent > 0 && (
-                  <div className="flex justify-between text-emerald-400">
-                    <span>Member Discount ({discountPercent}%):</span>
-                    <span>-{formatCurrency(cartDiscountAmount)}</span>
+              )}
+
+              {/* Delivery Address if online delivery */}
+              {channel === "SOFA_ONLINE" && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOrderType("ONLINE_COLLECTION")}
+                      className={`py-1.5 px-2 rounded-lg border text-[11px] font-semibold ${
+                        orderType === "ONLINE_COLLECTION"
+                          ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400"
+                      }`}
+                    >
+                      Club Pickup
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrderType("ONLINE_DELIVERY")}
+                      className={`py-1.5 px-2 rounded-lg border text-[11px] font-semibold ${
+                        orderType === "ONLINE_DELIVERY"
+                          ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400"
+                      }`}
+                    >
+                      Doorstep Delivery
+                    </button>
                   </div>
-                )}
-                <div className="flex justify-between text-sm font-bold text-white pt-2 border-t border-slate-800">
-                  <span>Net Payable:</span>
-                  <span className="text-amber-400">{formatCurrency(cartFinalTotal)}</span>
+                  {orderType === "ONLINE_DELIVERY" && (
+                    <input
+                      type="text"
+                      placeholder="Home Delivery Address in Hyderabad..."
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                    />
+                  )}
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pricing Summary & Checkout Button */}
+          <div className="pt-3 border-t border-slate-800 space-y-2 text-xs">
+            <div className="flex justify-between text-slate-400">
+              <span>Subtotal:</span>
+              <span className="font-mono">{formatCurrency(cartSubtotal)}</span>
+            </div>
+            {discountPercent > 0 && (
+              <div className="flex justify-between text-emerald-400">
+                <span>Member Tier Discount ({discountPercent}%):</span>
+                <span className="font-mono">-{formatCurrency(cartDiscountAmount)}</span>
               </div>
             )}
+            <div className="flex justify-between text-white font-bold text-sm pt-1 border-t border-slate-800/60">
+              <span>Payable Total:</span>
+              <span className="font-mono text-amber-400">{formatCurrency(cartFinalTotal)}</span>
+            </div>
 
-            {/* Pay / Complete Order Button */}
             <button
               disabled={cartItemsList.length === 0}
-              onClick={() => {
-                if (channel === "COUNTER") {
-                  setIsPayModalOpen(true);
-                } else {
-                  handlePlaceOrder("UPI");
-                }
-              }}
-              className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:opacity-40 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-amber-950 flex items-center justify-center gap-2"
+              onClick={() => setIsPayModalOpen(true)}
+              className="w-full py-2.5 mt-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-amber-950 transition flex items-center justify-center gap-1.5"
             >
-              <ShieldCheck className="w-4 h-4" />
-              <span>
-                {channel === "COUNTER"
-                  ? `Pay ${formatCurrency(cartFinalTotal)} (POS Modal)`
-                  : `Place Sofa Order (${formatCurrency(cartFinalTotal)})`}
-              </span>
+              <span>Proceed to Instant Checkout</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       </div>
+
+      {/* Product Add / Edit Modal */}
+      {isProductModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-xs font-semibold text-amber-400 uppercase">
+                  Pro Shop Gear Inventory
+                </span>
+                <h2 className="text-lg font-bold text-white mt-0.5">
+                  {editingProductId ? "Edit Product Details" : "Add New Gear Product"}
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsProductModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {productModalError && (
+              <div className="p-3 bg-rose-950/60 border border-rose-800 rounded-xl text-xs text-rose-300 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{productModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-400">Product Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Wilson Pro Staff 97 V14 Racket"
+                  value={productForm.name}
+                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400">Category</label>
+                  <select
+                    value={productForm.category}
+                    onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  >
+                    <option value="RACKET">RACKET</option>
+                    <option value="BALLS">BALLS</option>
+                    <option value="SHOES">SHOES</option>
+                    <option value="APPAREL">APPAREL</option>
+                    <option value="ACCESSORIES">ACCESSORIES</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">SKU Code</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. SKU-PRO-01"
+                    value={productForm.sku}
+                    onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400">Price (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={productForm.price}
+                    onChange={(e) => setProductForm({ ...productForm, price: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Shelf Stock</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={productForm.stockQuantity}
+                    onChange={(e) => setProductForm({ ...productForm, stockQuantity: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Low Limit</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={productForm.reorderThreshold}
+                    onChange={(e) => setProductForm({ ...productForm, reorderThreshold: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Product specs, grip size, string tension details..."
+                  value={productForm.description}
+                  onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsProductModalOpen(false)}
+                className="flex-1 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProductSubmitting}
+                onClick={handleSaveProduct}
+                className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-sm font-bold shadow-lg shadow-amber-950"
+              >
+                {isProductSubmitting ? "Saving..." : editingProductId ? "Save Product" : "Create Product"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment Modal for In-Store Counter Checkout */}
       {isPayModalOpen && (
@@ -554,7 +825,6 @@ export function ShopScene({
           memberId={selectedMemberId || undefined}
           memberName={selectedMember?.name || customerName || "Counter Customer"}
           onSuccess={async (txn) => {
-            // Call order backend with txn already confirmed
             await handlePlaceOrder(txn.paymentMethod);
           }}
         />

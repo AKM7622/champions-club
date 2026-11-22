@@ -7,7 +7,7 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: "OWNER" | "FRONT_DESK" | "PRO_SHOP" | "BAR_STAFF" | "CHEF" | "COACH" | "MEMBER";
+  role: "OWNER" | "FRONT_DESK" | "PRO_SHOP" | "BAR_STAFF" | "CHEF" | "COACH" | "MEMBER" | "HR" | "CAFE_MANAGER" | string;
   staff?: any | null;
   member?: any | null;
 }
@@ -35,7 +35,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
+export const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
   login: async () => ({ success: false, error: "Not initialized" }),

@@ -16,10 +16,13 @@ import {
   Phone,
   User,
   Zap,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { formatCurrency, formatTime, formatDate } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
-import { setHours, setMinutes, format } from "date-fns";
+import { setHours, setMinutes, format, addMonths } from "date-fns";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface CourtSceneProps {
   pollIntervalMs?: number;
@@ -32,12 +35,17 @@ export function CourtScene({
   onDataLoaded,
   memberSelectRef,
 }: CourtSceneProps = {}) {
+  const { user } = useAuth();
+  const canManageCourts = user?.role === "OWNER" || user?.role === "COACH";
+
   const [courts, setCourts] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const maxBookingDateStr = format(addMonths(new Date(), 1), "yyyy-MM-dd");
+
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [loading, setLoading] = useState(true);
 
   // Booking Modal
@@ -52,6 +60,20 @@ export function CourtScene({
   const [socialPlayersCount, setSocialPlayersCount] = useState(4);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Court Management Modal (Add/Edit)
+  const [isCourtModalOpen, setIsCourtModalOpen] = useState(false);
+  const [editingCourtId, setEditingCourtId] = useState<string | null>(null);
+  const [courtForm, setCourtForm] = useState({
+    name: "",
+    sport: "TENNIS",
+    surface: "Plexicushion Synthetic (Floodlit)",
+    hourlyRate: 800,
+    description: "",
+    isAvailable: true,
+  });
+  const [courtModalError, setCourtModalError] = useState<string | null>(null);
+  const [isCourtSubmitting, setIsCourtSubmitting] = useState(false);
 
   // Payment Modal
   const [pendingPaymentBooking, setPendingPaymentBooking] = useState<any | null>(null);
@@ -114,7 +136,22 @@ export function CourtScene({
   // Open Booking Modal for a court
   const handleOpenBook = (court: any, slot?: string) => {
     setSelectedCourt(court);
-    if (slot) setSelectedTimeSlot(slot);
+    if (slot) {
+      setSelectedTimeSlot(slot);
+    } else {
+      // Find the first future slot for today, or default to 18:00
+      const now = new Date();
+      if (selectedDate === todayStr) {
+        const firstValid = timeSlots.find((s) => {
+          const [h, m] = s.split(":").map(Number);
+          const sTime = setMinutes(setHours(new Date(), h), m);
+          return sTime > now;
+        });
+        setSelectedTimeSlot(firstValid || "18:00");
+      } else {
+        setSelectedTimeSlot("18:00");
+      }
+    }
     setBookingError(null);
     setIsBookingModalOpen(true);
   };
@@ -125,9 +162,28 @@ export function CourtScene({
     setIsSubmitting(true);
     setBookingError(null);
 
+    // Date validations
+    if (selectedDate < todayStr) {
+      setBookingError("Cannot book court for past dates.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (selectedDate > maxBookingDateStr) {
+      setBookingError("Court bookings can only be made up to 1 month in advance.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const [hours, minutes] = selectedTimeSlot.split(":").map(Number);
     const dateObj = new Date(selectedDate);
     const startTime = setMinutes(setHours(dateObj, hours), minutes);
+
+    if (selectedDate === todayStr && startTime.getTime() < Date.now() - 60000) {
+      setBookingError("Cannot book a court slot in the past.");
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       const payload = {
@@ -183,7 +239,87 @@ export function CourtScene({
     }
   };
 
+  // Open Add Court Modal
+  const handleOpenAddCourt = () => {
+    setEditingCourtId(null);
+    setCourtForm({
+      name: "",
+      sport: "TENNIS",
+      surface: "Plexicushion Synthetic (Floodlit)",
+      hourlyRate: 800,
+      description: "",
+      isAvailable: true,
+    });
+    setCourtModalError(null);
+    setIsCourtModalOpen(true);
+  };
+
+  // Open Edit Court Modal
+  const handleOpenEditCourt = (court: any) => {
+    setEditingCourtId(court.id);
+    setCourtForm({
+      name: court.name,
+      sport: court.sport,
+      surface: court.surface,
+      hourlyRate: court.hourlyRate,
+      description: court.description || "",
+      isAvailable: court.isAvailable ?? true,
+    });
+    setCourtModalError(null);
+    setIsCourtModalOpen(true);
+  };
+
+  // Save Court (Create or Update)
+  const handleSaveCourt = async () => {
+    setIsCourtSubmitting(true);
+    setCourtModalError(null);
+
+    try {
+      const method = editingCourtId ? "PUT" : "POST";
+      const payload = editingCourtId ? { id: editingCourtId, ...courtForm } : courtForm;
+
+      const res = await fetch("/api/courts", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to save court");
+      }
+
+      setIsCourtModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      setCourtModalError(err.message);
+    } finally {
+      setIsCourtSubmitting(false);
+    }
+  };
+
+  // Delete Court
+  const handleDeleteCourt = async (courtId: string, courtName: string) => {
+    if (!confirm(`Are you sure you want to delete court "${courtName}"? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`/api/courts?id=${encodeURIComponent(courtId)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || "Failed to delete court");
+        return;
+      }
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || "Network error while deleting court");
+    }
+  };
+
   const selectedMemberObj = members.find((m) => m.id === selectedMemberId);
+  const isToday = selectedDate === todayStr;
+  const now = new Date();
 
   return (
     <div className="space-y-6">
@@ -197,7 +333,7 @@ export function CourtScene({
             <h1 className="text-xl font-bold text-white">Scene 2: Court Booking Engine</h1>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            60-min sessions • 30-min sliding slots • 2/day member cap • Friday Social Play • Zero conflict locks.
+            60-min sessions • 30-min sliding slots • 2/day member cap • Friday Social Play • Advance window up to 1 month.
           </p>
         </div>
 
@@ -205,9 +341,20 @@ export function CourtScene({
           <input
             type="date"
             value={selectedDate}
+            min={todayStr}
+            max={maxBookingDateStr}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500"
           />
+          {canManageCourts && (
+            <button
+              onClick={handleOpenAddCourt}
+              className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-semibold rounded-xl transition text-sm shadow"
+              title="Add a new sports court"
+            >
+              <Plus className="w-4 h-4" /> Add Court
+            </button>
+          )}
           <button
             onClick={() => {
               if (courts.length > 0) handleOpenBook(courts[0]);
@@ -242,9 +389,29 @@ export function CourtScene({
                   >
                     {court.sport}
                   </span>
-                  <span className="text-xs font-semibold text-slate-300">
-                    {formatCurrency(court.hourlyRate)}/hr
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-300">
+                      {formatCurrency(court.hourlyRate)}/hr
+                    </span>
+                    {canManageCourts && (
+                      <div className="flex items-center gap-1 border-l border-slate-800 pl-2">
+                        <button
+                          onClick={() => handleOpenEditCourt(court)}
+                          className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded transition"
+                          title="Edit Court"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCourt(court.id, court.name)}
+                          className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition"
+                          title="Delete Court"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <h3 className="font-bold text-white text-sm line-clamp-1">{court.name}</h3>
@@ -288,6 +455,9 @@ export function CourtScene({
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Friday Social Play
             </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-600" /> Past (Unavailable)
+            </span>
           </div>
         </div>
 
@@ -326,6 +496,9 @@ export function CourtScene({
                       slotM
                     );
 
+                    // Past slot check: if today and slot has already ended or started
+                    const isPast = isToday && slotStart < now;
+
                     // Check if this slot overlaps with any active booking
                     const activeBooking = courtBookings.find((b) => {
                       const bStart = new Date(b.startTime);
@@ -355,6 +528,19 @@ export function CourtScene({
                               ? "Social"
                               : activeBooking.member?.name?.split(" ")[0] || "Walk-in"}
                           </span>
+                        </div>
+                      );
+                    }
+
+                    if (isPast) {
+                      return (
+                        <div
+                          key={slot}
+                          title={`Past Slot: ${slot} (Not available for reservation)`}
+                          className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border border-slate-900 bg-slate-950/60 text-[11px] font-mono text-slate-600 flex flex-col items-center min-w-[70px] cursor-not-allowed opacity-50"
+                        >
+                          <span className="font-semibold line-through">{slot}</span>
+                          <span className="text-[9px] text-slate-600">PAST</span>
                         </div>
                       );
                     }
@@ -524,10 +710,12 @@ export function CourtScene({
               {/* Slot Time Picker */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400">Date</label>
+                  <label className="text-xs text-slate-400">Date (up to 1 month)</label>
                   <input
                     type="date"
                     value={selectedDate}
+                    min={todayStr}
+                    max={maxBookingDateStr}
                     onChange={(e) => setSelectedDate(e.target.value)}
                     className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
                   />
@@ -539,12 +727,17 @@ export function CourtScene({
                     onChange={(e) => setSelectedTimeSlot(e.target.value)}
                     className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
                   >
-                    {timeSlots.map((ts) => (
-                      <option key={ts} value={ts}>
-                        {ts} to{" "}
-                        {String(Number(ts.split(":")[0]) + 1).padStart(2, "0")}:{ts.split(":")[1]}
-                      </option>
-                    ))}
+                    {timeSlots.map((ts) => {
+                      const [h, m] = ts.split(":").map(Number);
+                      const tsStart = setMinutes(setHours(new Date(selectedDate), h), m);
+                      const isSlotPast = isToday && tsStart < now;
+                      return (
+                        <option key={ts} value={ts} disabled={isSlotPast}>
+                          {ts} to {String(Number(ts.split(":")[0]) + 1).padStart(2, "0")}:{ts.split(":")[1]}
+                          {isSlotPast ? " (Past Slot)" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -696,6 +889,128 @@ export function CourtScene({
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-950"
               >
                 {isSubmitting ? "Locking Slot..." : "Confirm Reservation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit Court Modal */}
+      {isCourtModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-xs font-semibold text-emerald-400 uppercase">
+                  Court Management
+                </span>
+                <h2 className="text-lg font-bold text-white mt-0.5">
+                  {editingCourtId ? "Edit Court Details" : "Add New Sports Court"}
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsCourtModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {courtModalError && (
+              <div className="p-3 bg-rose-950/60 border border-rose-800 rounded-xl text-xs text-rose-300 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{courtModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-400">Court Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Centre Tennis Court 3"
+                  value={courtForm.name}
+                  onChange={(e) => setCourtForm({ ...courtForm, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400">Sport Type</label>
+                  <select
+                    value={courtForm.sport}
+                    onChange={(e) => setCourtForm({ ...courtForm, sport: e.target.value as any })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  >
+                    <option value="TENNIS">TENNIS</option>
+                    <option value="CRICKET">CRICKET</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Base Hourly Rate (₹)</label>
+                  <input
+                    type="number"
+                    min={100}
+                    step={50}
+                    value={courtForm.hourlyRate}
+                    onChange={(e) => setCourtForm({ ...courtForm, hourlyRate: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">Surface Specification</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Plexicushion Synthetic (Floodlit) or AstroTurf"
+                  value={courtForm.surface}
+                  onChange={(e) => setCourtForm({ ...courtForm, surface: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">Notes / Description (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Professional LED floodlights, tournament standard"
+                  value={courtForm.description}
+                  onChange={(e) => setCourtForm({ ...courtForm, description: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-white">Court Available for Booking</p>
+                  <p className="text-[11px] text-slate-400">When enabled, members can reserve slots on this court.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={courtForm.isAvailable}
+                  onChange={(e) => setCourtForm({ ...courtForm, isAvailable: e.target.checked })}
+                  className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsCourtModalOpen(false)}
+                className="flex-1 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isCourtSubmitting}
+                onClick={handleSaveCourt}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-950"
+              >
+                {isCourtSubmitting ? "Saving Court..." : editingCourtId ? "Save Changes" : "Create Court"}
               </button>
             </div>
           </div>

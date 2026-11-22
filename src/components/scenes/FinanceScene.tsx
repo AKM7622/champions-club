@@ -22,15 +22,32 @@ import {
   Building2,
   Clock,
   Sparkles,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { formatCurrency, formatDate, formatTime } from "@/lib/utils";
 import { PaymentModal } from "../PaymentModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function FinanceScene() {
+  const auth = useAuth?.() || { user: null };
+  const user = auth?.user;
+  const isHR = user?.role === "HR";
+  const canManageStaff = user?.role === "OWNER" || user?.role === "HR";
+
   const [data, setData] = useState<any | null>(null);
   const [leaves, setLeaves] = useState<any[]>([]);
+  const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [subTab, setSubTab] = useState<"OVERVIEW" | "INVOICES" | "HR_PAYROLL" | "LEDGER">("OVERVIEW");
+  const [subTab, setSubTab] = useState<"OVERVIEW" | "INVOICES" | "HR_PAYROLL" | "LEDGER">(
+    isHR ? "HR_PAYROLL" : "OVERVIEW"
+  );
+
+  useEffect(() => {
+    if (isHR) {
+      setSubTab("HR_PAYROLL");
+    }
+  }, [isHR]);
 
   // Invoicing Modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -46,19 +63,184 @@ export function FinanceScene() {
   const [settlingInvoice, setSettlingInvoice] = useState<any | null>(null);
   const [shareSummaryOpen, setShareSummaryOpen] = useState(false);
 
+  // Staff Management Modal (for HR and OWNER)
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  const [staffForm, setStaffForm] = useState({
+    name: "",
+    email: "",
+    role: "COURT_COACH",
+    phone: "",
+    monthlySalary: 35000,
+    hourlyWage: 150,
+    password: "password123",
+    userRole: "COACH",
+  });
+  const [staffModalError, setStaffModalError] = useState<string | null>(null);
+
+  const handleOpenAddStaff = () => {
+    setEditingStaffId(null);
+    setStaffForm({
+      name: "",
+      email: "",
+      role: "COURT_COACH",
+      phone: "",
+      monthlySalary: 35000,
+      hourlyWage: 150,
+      password: "password123",
+      userRole: "COACH",
+    });
+    setStaffModalError(null);
+    setIsStaffModalOpen(true);
+  };
+
+  const handleOpenEditStaff = (member: any) => {
+    setEditingStaffId(member.id);
+    setStaffForm({
+      name: member.name || "",
+      email: member.email || "",
+      role: member.role || "COURT_COACH",
+      phone: member.phone || "",
+      monthlySalary: member.monthlySalary ?? 35000,
+      hourlyWage: member.hourlyWage ?? 150,
+      password: "",
+      userRole: member.user?.role || "COACH",
+    });
+    setStaffModalError(null);
+    setIsStaffModalOpen(true);
+  };
+
+  const handleSaveStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffModalError(null);
+
+    try {
+      if (editingStaffId) {
+        const res = await fetch("/api/hr/staff", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editingStaffId,
+            name: staffForm.name,
+            email: staffForm.email,
+            role: staffForm.role,
+            phone: staffForm.phone,
+            monthlySalary: Number(staffForm.monthlySalary),
+            hourlyWage: Number(staffForm.hourlyWage),
+            userRole: staffForm.userRole,
+          }),
+        });
+        const resData = await res.json();
+        if (!res.ok || !resData.success) {
+          setStaffModalError(resData.error || "Failed to update employee");
+          return;
+        }
+      } else {
+        const res = await fetch("/api/hr/staff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: staffForm.name,
+            email: staffForm.email,
+            role: staffForm.role,
+            phone: staffForm.phone,
+            monthlySalary: Number(staffForm.monthlySalary),
+            hourlyWage: Number(staffForm.hourlyWage),
+            password: staffForm.password || "password123",
+            userRole: staffForm.userRole,
+            createLoginAccount: true,
+          }),
+        });
+        const resData = await res.json();
+        if (!res.ok || !resData.success) {
+          setStaffModalError(resData.error || "Failed to add employee");
+          return;
+        }
+      }
+
+      setIsStaffModalOpen(false);
+      setEditingStaffId(null);
+      fetchData();
+    } catch (err: any) {
+      setStaffModalError(err.message || "Network error");
+    }
+  };
+
+  const handleDeleteStaff = async (staffId: string, staffName: string) => {
+    if (!confirm(`Are you sure you want to remove employee "${staffName}"? This will delete their shifts, leaves, and linked login credentials.`)) return;
+
+    try {
+      const res = await fetch(`/api/hr/staff?id=${encodeURIComponent(staffId)}`, {
+        method: "DELETE",
+      });
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        alert(resData.error || "Failed to remove employee");
+        return;
+      }
+      fetchData();
+    } catch (err: any) {
+      alert(err.message || "Network error while removing employee");
+    }
+  };
+
   // Fetch Data
   const fetchData = async () => {
     try {
-      const [financeRes, leavesRes] = await Promise.all([
-        fetch("/api/finance/analytics"),
-        fetch("/api/hr/leaves"),
-      ]);
+      if (isHR) {
+        // HR only has access to HR & Staff endpoints, not finance analytics
+        const [staffRes, leavesRes] = await Promise.all([
+          fetch("/api/hr/staff"),
+          fetch("/api/hr/leaves"),
+        ]);
+        const sData = await staffRes.json();
+        const lData = await leavesRes.json();
 
-      const fData = await financeRes.json();
-      const lData = await leavesRes.json();
+        const fetchedStaff = sData.staff || [];
+        setStaffList(fetchedStaff);
+        if (lData.success) setLeaves(lData.leaves || []);
 
-      if (fData.success) setData(fData);
-      if (lData.success) setLeaves(lData.leaves);
+        const payrollSum = fetchedStaff.reduce((sum: number, s: any) => sum + (s.monthlySalary || 0), 0);
+        setData({
+          summary: {
+            revenueToday: 0,
+            revenueThisWeek: 0,
+            revenueThisMonth: 0,
+            totalEstimatedMonthlyPayroll: payrollSum,
+            netOperatingMargin: 0,
+            averageDailyRunRate: 0,
+            estimatedTax: 0,
+            netProfit: 0,
+          },
+          categoryBreakdown: {},
+          paymentMethodBreakdown: {},
+          dailyTrend: [],
+          staff: fetchedStaff,
+          invoices: [],
+          recentTransactions: [],
+        });
+      } else {
+        // OWNER has full finance analytics access
+        const [financeRes, leavesRes, staffRes] = await Promise.all([
+          fetch("/api/finance/analytics"),
+          fetch("/api/hr/leaves"),
+          fetch("/api/hr/staff"),
+        ]);
+
+        const fData = await financeRes.json();
+        const lData = await leavesRes.json();
+        const sData = await staffRes.json();
+
+        if (fData.success) {
+          setData(fData);
+          if (sData.success && sData.staff) {
+            setStaffList(sData.staff);
+          } else {
+            setStaffList(fData.staff || []);
+          }
+        }
+        if (lData.success) setLeaves(lData.leaves || []);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -71,7 +253,7 @@ export function FinanceScene() {
     fetchData();
     const interval = setInterval(fetchData, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isHR]);
 
   // Leave Approval Action
   const handleLeaveDecision = async (leaveId: string, status: "APPROVED" | "REJECTED") => {
@@ -142,6 +324,11 @@ export function FinanceScene() {
     0
   ) as number;
 
+  const staffToDisplay = staffList.length > 0 ? staffList : (staff || []);
+  const totalPayrollDisplay =
+    summary?.totalEstimatedMonthlyPayroll ||
+    staffToDisplay.reduce((sum: number, s: any) => sum + (s.monthlySalary || 0), 0);
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -149,40 +336,49 @@ export function FinanceScene() {
         <div>
           <div className="flex items-center gap-2">
             <span className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg">
-              <TrendingUp className="w-5 h-5" />
+              {isHR ? <Users className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
             </span>
-            <h1 className="text-xl font-bold text-white">Scene 6: Owner's Financial & HR Aggregator</h1>
+            <h1 className="text-xl font-bold text-white">
+              {isHR ? "HR & Employee Management Portal" : "Scene 6: Owner's Financial & HR Aggregator"}
+            </h1>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            "How much did we earn, from where, and what do we owe?" All revenue unified from courts, shop, and bar.
+            {isHR
+              ? "Manage club employees, staff credentials, roles, payroll schedules, and leave approvals."
+              : "\"How much did we earn, from where, and what do we owe?\" All revenue unified from courts, shop, and bar."}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShareSummaryOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition"
-          >
-            <Share2 className="w-3.5 h-3.5" /> Share Report
-          </button>
+        {!isHR && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShareSummaryOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition"
+            >
+              <Share2 className="w-3.5 h-3.5" /> Share Report
+            </button>
 
-          <button
-            onClick={() => setShowInvoiceModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950"
-          >
-            <Plus className="w-4 h-4" /> Invoice Business Client
-          </button>
-        </div>
+            <button
+              onClick={() => setShowInvoiceModal(true)}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950"
+            >
+              <Plus className="w-4 h-4" /> Invoice Business Client
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sub Tabs */}
       <div className="flex p-1 bg-slate-950 rounded-xl border border-slate-800 w-fit">
-        {[
-          { key: "OVERVIEW", label: "Financial P&L" },
-          { key: "INVOICES", label: `Corporate Invoices (${invoices.length})` },
-          { key: "HR_PAYROLL", label: `HR, Payroll & Leaves (${staff.length})` },
-          { key: "LEDGER", label: "30-Day Unified Ledger" },
-        ].map((t) => (
+        {(isHR
+          ? [{ key: "HR_PAYROLL", label: `HR & Staff Employees (${staffToDisplay.length})` }]
+          : [
+              { key: "OVERVIEW", label: "Financial P&L" },
+              { key: "INVOICES", label: `Corporate Invoices (${(invoices || []).length})` },
+              { key: "HR_PAYROLL", label: `HR, Payroll & Leaves (${staffToDisplay.length})` },
+              { key: "LEDGER", label: "30-Day Unified Ledger" },
+            ]
+        ).map((t) => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key as any)}
@@ -580,27 +776,62 @@ export function FinanceScene() {
           {/* Staff Roster & Monthly Payroll */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Staff Roster & Payroll Schedule ({staff.length} Employees)
-              </h3>
-              <span className="font-mono text-xs font-bold text-rose-400">
-                Monthly Payroll: {formatCurrency(summary.totalEstimatedMonthlyPayroll)}
-              </span>
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Staff Roster & Payroll Schedule ({staffToDisplay.length} Employees)
+                </h3>
+                <span className="font-mono text-xs font-bold text-rose-400">
+                  Monthly Payroll: {formatCurrency(totalPayrollDisplay)}
+                </span>
+              </div>
+              {canManageStaff && (
+                <button
+                  onClick={handleOpenAddStaff}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow"
+                >
+                  <Plus className="w-4 h-4" /> Add Employee
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {staff.map((s: any) => (
+              {staffToDisplay.map((s: any) => (
                 <div
                   key={s.id}
-                  className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 text-xs"
+                  className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 text-xs hover:border-slate-700 transition"
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-white">{s.name}</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                      {s.role}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                        {s.role}
+                      </span>
+                      {canManageStaff && (
+                        <>
+                          <button
+                            onClick={() => handleOpenEditStaff(s)}
+                            className="p-1 text-slate-400 hover:text-emerald-400 rounded transition"
+                            title="Edit Employee"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStaff(s.id, s.name)}
+                            className="p-1 text-slate-400 hover:text-rose-400 rounded transition"
+                            title="Remove Employee"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <p className="text-slate-400 text-[11px]">{s.email} • {s.phone}</p>
+                  {s.user?.role && (
+                    <p className="text-[10px] text-emerald-400/80 font-mono">
+                      Club Login Role: {s.user.role}
+                    </p>
+                  )}
                   <div className="pt-2 border-t border-slate-800/80 flex justify-between items-center font-mono">
                     <span className="text-slate-500">Fixed Monthly:</span>
                     <span className="font-bold text-white">
@@ -839,6 +1070,170 @@ export function FinanceScene() {
                 Copy Brief to Clipboard
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit Staff Member Modal */}
+      {isStaffModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  {editingStaffId ? "Edit Club Employee" : "Add New Club Employee"}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {editingStaffId
+                    ? "Update employee credentials, role, and compensation."
+                    : "Create staff profile and system login account."}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsStaffModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {staffModalError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400">
+                {staffModalError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStaff} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={staffForm.name}
+                  onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
+                  placeholder="e.g. Ramesh Kumar"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Work Email</label>
+                <input
+                  type="email"
+                  required
+                  value={staffForm.email}
+                  onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
+                  placeholder="e.g. ramesh@champions.club"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Contact Phone</label>
+                <input
+                  type="tel"
+                  required
+                  value={staffForm.phone}
+                  onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Operational Role</label>
+                  <select
+                    value={staffForm.role}
+                    onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="COURT_COACH">Court Coach</option>
+                    <option value="FRONT_DESK">Front Desk</option>
+                    <option value="BARISTA">Barista / Bar</option>
+                    <option value="CHEF">Kitchen Chef</option>
+                    <option value="MANAGER">Manager</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Club Login Role</label>
+                  <select
+                    value={staffForm.userRole}
+                    onChange={(e) => setStaffForm({ ...staffForm, userRole: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="COACH">Court Coach</option>
+                    <option value="FRONT_DESK">Front Desk</option>
+                    <option value="BAR_STAFF">Bar Manager</option>
+                    <option value="CHEF">Chef</option>
+                    <option value="PRO_SHOP">Pro Shop</option>
+                    <option value="HR">HR Specialist</option>
+                    <option value="CAFE_MANAGER">Cafe Manager</option>
+                    <option value="OWNER">Club Owner</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Monthly Salary (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="500"
+                    required
+                    value={staffForm.monthlySalary}
+                    onChange={(e) => setStaffForm({ ...staffForm, monthlySalary: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Hourly Wage (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="10"
+                    required
+                    value={staffForm.hourlyWage}
+                    onChange={(e) => setStaffForm({ ...staffForm, hourlyWage: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {!editingStaffId && (
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">
+                    Initial Password <span className="text-slate-500 font-normal">(Defaults to password123)</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={staffForm.password}
+                    onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })}
+                    placeholder="password123"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-800 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsStaffModalOpen(false)}
+                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold"
+                >
+                  {editingStaffId ? "Update Employee" : "Save Employee"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

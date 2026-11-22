@@ -104,9 +104,12 @@ export default function HomePage() {
         return "SCENE_3";
       case "BAR_STAFF":
       case "CHEF":
+      case "CAFE_MANAGER":
         return "SCENE_4";
       case "COACH":
         return "SCENE_2";
+      case "HR":
+        return "SCENE_6";
       case "FRONT_DESK":
       case "OWNER":
       default:
@@ -155,7 +158,7 @@ export default function HomePage() {
       label: "4. Bar & Kitchen KDS",
       sublabel: "Post-match tabs & discounts",
       icon: Coffee,
-      allowedRoles: ["OWNER", "BAR_STAFF", "CHEF"],
+      allowedRoles: ["OWNER", "BAR_STAFF", "CHEF", "CAFE_MANAGER"],
     },
     {
       key: "SCENE_5" as SceneKey,
@@ -169,7 +172,7 @@ export default function HomePage() {
       label: "6. Owner's Finance & HR",
       sublabel: "End of month P&L aggregation",
       icon: TrendingUp,
-      allowedRoles: ["OWNER"],
+      allowedRoles: ["OWNER", "HR"],
     },
   ];
 
@@ -189,10 +192,12 @@ export default function HomePage() {
   const demoPersonas = [
     { name: "Farhan Merchant (Owner)", email: "farhan.m@champions.club", role: "OWNER" },
     { name: "Sunil Gavaskar K. (Front Desk)", email: "sunil.k@champions.club", role: "FRONT_DESK" },
-    { name: "Pro Shop Attendant", email: "proshop@champions.club", role: "PRO_SHOP" },
-    { name: "Manoj Barista (Bar/Cafe)", email: "manoj.b@champions.club", role: "BAR_STAFF" },
+    { name: "Pro Shop Attendant (Shop Owner)", email: "proshop@champions.club", role: "PRO_SHOP" },
+    { name: "Manoj Barista (Bar Manager)", email: "manoj.b@champions.club", role: "BAR_STAFF" },
+    { name: "Kavita Nair (Cafe Manager)", email: "cafe.manager@champions.club", role: "CAFE_MANAGER" },
     { name: "Chef Harish Rawat (Kitchen KDS)", email: "harish.r@champions.club", role: "CHEF" },
-    { name: "Coach Anand Kumar (Coach)", email: "coach.anand@champions.club", role: "COACH" },
+    { name: "Ananya Deshmukh (HR Manager)", email: "hr@champions.club", role: "HR" },
+    { name: "Coach Anand Kumar (Court Manager)", email: "coach.anand@champions.club", role: "COACH" },
     { name: "Rohan Sharma (Gold Member)", email: "rohan.sharma@example.com", role: "MEMBER" },
     { name: "Neha Kapoor (Silver Expiring)", email: "neha.kapoor@example.com", role: "MEMBER" },
   ];

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { verifyPassword, createSession, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { authRateLimiter } from "@/lib/rate-limiter";
 import { logAuthEvent } from "@/lib/audit";
+import bcrypt from "bcryptjs";
 
 export async function POST(req: NextRequest) {
   const ipAddress =
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Lookup user by email or by memberNumber
-    const user = await prisma.user.findFirst({
+    let user = await prisma.user.findFirst({
       where: {
         OR: [
           { email: { equals: normalizedIdentifier, mode: "insensitive" } },
@@ -82,6 +83,30 @@ export async function POST(req: NextRequest) {
         },
       },
     });
+
+    if (!user && isDemoSwitch) {
+      const demoRoles: Record<string, { name: string; role: any }> = {
+        "hr@champions.club": { name: "Ananya Deshmukh (HR)", role: "HR" },
+        "cafe.manager@champions.club": { name: "Kavita Nair (Cafe Manager)", role: "CAFE_MANAGER" },
+        "cafemanager@champions.club": { name: "Kavita Nair (Cafe Manager)", role: "CAFE_MANAGER" },
+      };
+      const demoConfig = demoRoles[normalizedIdentifier];
+      if (demoConfig) {
+        const defaultHash = await bcrypt.hash("password123", 10);
+        const created = await prisma.user.create({
+          data: {
+            email: normalizedIdentifier,
+            name: demoConfig.name,
+            role: demoConfig.role,
+            password: defaultHash,
+          },
+        });
+        user = await prisma.user.findUnique({
+          where: { id: created.id },
+          include: { staff: true, member: { include: { plan: true } } },
+        });
+      }
+    }
 
     if (!user) {
       // Record failed attempt in rate limiter

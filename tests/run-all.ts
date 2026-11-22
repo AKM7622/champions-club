@@ -16,6 +16,7 @@ const testFiles = [
   "tests/whitebox-members-and-crm.test.ts",
   "tests/whitebox-operations.test.ts",
   "tests/bar-closing-earnings.test.ts",
+  "tests/roles-crud-and-restrictions.test.ts",
 ];
 
 console.log(`\n========================================================`);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { BookingStatus, PaymentStatus } from "@prisma/client";
 import { PricingCalculator } from "@/lib/pricing-calculator";
-import { startOfDay, endOfDay, addMinutes } from "date-fns";
+import { startOfDay, endOfDay, addMinutes, addMonths } from "date-fns";
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,14 +59,23 @@ export async function POST(req: NextRequest) {
       notes,
     } = body;
 
-    if (!courtId || !startTimeStr) {
+    const startTimeRaw = startTimeStr || (body as any).startTime;
+
+    if (!courtId || !startTimeRaw) {
       return NextResponse.json(
         { success: false, error: "Court ID and start time are required." },
         { status: 400 }
       );
     }
 
-    const startTime = new Date(startTimeStr);
+    const startTime = new Date(startTimeRaw);
+    if (isNaN(startTime.getTime())) {
+      return NextResponse.json(
+        { success: false, error: "Invalid start time format provided." },
+        { status: 400 }
+      );
+    }
+
     const endTime = addMinutes(startTime, 60); // 1-hour session as per prompt
 
     // Fetch Court details
@@ -78,36 +87,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Court not found" }, { status: 404 });
     }
 
-    // 1. Conflict Prevention: Two people must never end up on the same court at the same time!
-    // Exception: If social play is explicitly active on that court
-    const conflictingBookings = await prisma.courtBooking.findMany({
-      where: {
-        courtId,
-        status: { not: BookingStatus.CANCELLED },
-        AND: [
-          { startTime: { lt: endTime } },
-          { endTime: { gt: startTime } },
-        ],
-      },
-    });
+    // Court Booking Constraints:
+    // 1. Cannot book past dates (bookingDate < today)
+    // 2. Reject any date > 1 month from today
+    // 3. On today's date, cannot book times before current time
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const bookingDayStart = startOfDay(startTime);
+    const oneMonthFromToday = addMonths(endOfDay(now), 1);
 
-    if (conflictingBookings.length > 0) {
-      if (!isSocialPlay || !conflictingBookings.every((b) => b.isSocialPlay)) {
+    if (bookingDayStart < todayStart) {
+      return NextResponse.json(
+        { success: false, error: "Cannot book court for past dates." },
+        { status: 400 }
+      );
+    }
+
+    if (startTime > oneMonthFromToday) {
+      return NextResponse.json(
+        { success: false, error: "Court bookings can only be made up to 1 month in advance." },
+        { status: 400 }
+      );
+    }
+
+    if (bookingDayStart.getTime() === todayStart.getTime()) {
+      if (startTime.getTime() < now.getTime() - 60000) {
         return NextResponse.json(
-          {
-            success: false,
-            error: `Court Conflict: ${court.name} is already booked from ${new Date(
-              conflictingBookings[0].startTime
-            ).toLocaleTimeString()} to ${new Date(
-              conflictingBookings[0].endTime
-            ).toLocaleTimeString()}. Two people must never end up on the same court simultaneously.`,
-          },
-          { status: 409 }
+          { success: false, error: "Cannot book a court slot in the past." },
+          { status: 400 }
         );
       }
     }
 
-    // 2. Member Limit: Each member can play at most twice a day
+    // Member Limit: Each member can play at most twice a day
     let member = null;
     let memberPlan = null;
 
@@ -134,7 +146,7 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      const maxAllowed = memberPlan.maxDailyBookings || 2;
+      const maxAllowed = memberPlan?.maxDailyBookings || 2;
       if (dailyBookingsCount >= maxAllowed) {
         return NextResponse.json(
           {
@@ -142,6 +154,35 @@ export async function POST(req: NextRequest) {
             error: `Daily Limit Exceeded: Member ${member.name} has already booked ${dailyBookingsCount} session(s) on this day. Each member can play at most ${maxAllowed} times a day.`,
           },
           { status: 400 }
+        );
+      }
+    }
+
+    // Conflict Prevention: Two people must never end up on the same court at the same time!
+    // Exception: If social play is explicitly active on that court
+    const conflictingBookings = await prisma.courtBooking.findMany({
+      where: {
+        courtId,
+        status: { not: BookingStatus.CANCELLED },
+        AND: [
+          { startTime: { lt: endTime } },
+          { endTime: { gt: startTime } },
+        ],
+      },
+    });
+
+    if (conflictingBookings.length > 0) {
+      if (!isSocialPlay || !conflictingBookings.every((b) => b.isSocialPlay)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Court Conflict: ${court.name} is already booked from ${new Date(
+              conflictingBookings[0].startTime
+            ).toLocaleTimeString()} to ${new Date(
+              conflictingBookings[0].endTime
+            ).toLocaleTimeString()}. Two people must never end up on the same court simultaneously.`,
+          },
+          { status: 409 }
         );
       }
     }

@@ -99,12 +99,14 @@ export async function middleware(req: NextRequest) {
         );
       }
 
-      // HR & Staff Management: strictly OWNER only
-      if (pathname.startsWith("/api/hr")) {
-        return NextResponse.json(
-          { success: false, error: "Forbidden: HR records require OWNER permissions." },
-          { status: 403 }
-        );
+      // HR & Staff Management: strictly OWNER and HR
+      if (pathname.startsWith("/api/hr") || pathname.startsWith("/api/staff")) {
+        if (role !== "HR") {
+          return NextResponse.json(
+            { success: false, error: "Forbidden: HR records require HR or OWNER permissions." },
+            { status: 403 }
+          );
+        }
       }
 
       // Security Audit Logs: strictly OWNER only
@@ -204,15 +206,20 @@ export async function middleware(req: NextRequest) {
         }
       }
 
-      // Bar & Café Tabs: modifications require BAR_STAFF or CHEF
+      // Bar & Café Tabs: modifications require BAR_STAFF. CHEF can only PATCH kitchen items.
       if (pathname.startsWith("/api/bar/tabs")) {
-        if (["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
-          if (role !== "BAR_STAFF" && role !== "CHEF") {
+        if (role === "CHEF") {
+          if (method !== "PATCH" && method !== "GET") {
             return NextResponse.json(
-              { success: false, error: "Forbidden: Bar and kitchen tabs require BAR_STAFF or CHEF role." },
+              { success: false, error: "Forbidden: Chefs can only view orders and update kitchen order status." },
               { status: 403 }
             );
           }
+        } else if (role !== "BAR_STAFF") {
+          return NextResponse.json(
+            { success: false, error: "Forbidden: Bar and kitchen tabs require BAR_STAFF role." },
+            { status: 403 }
+          );
         }
       }
 
